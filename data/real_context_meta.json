@@ -1,0 +1,24 @@
+{
+  "status": "unavailable",
+  "generated_at": "2026-09-23T09:25:25+00:00",
+  "source": "OpenStreetMap через Overpass API",
+  "attribution": "© OpenStreetMap contributors (ODbL)",
+  "districts_source": "fallback_approx",
+  "usage": "Справочный слой. НЕ влияет на официальный расчёт индекса.",
+  "category_tags": {
+    "schools": "amenity=school",
+    "kindergartens": "amenity=kindergarten",
+    "clinics": "amenity=clinic|hospital, healthcare=clinic|hospital",
+    "bus_stops": "highway=bus_stop, public_transport=platform + bus/trolleybus=yes",
+    "parks": "leisure=park"
+  },
+  "dedup_radius_m": {
+    "schools": 150,
+    "kindergartens": 100,
+    "clinics": 100,
+    "bus_stops": 25,
+    "parks": 150
+  },
+  "warning": "Границы районов схематичные: распределение объектов по районам приблизительное.",
+  "error": "превышен общий лимит времени; последняя ошибка: сетевая ошибка: ReadTimeout: HTTPSConnectionPool(host='overpass-api.de', port=443): Read timed out. (read timeout=5.999998200000846)"
+}

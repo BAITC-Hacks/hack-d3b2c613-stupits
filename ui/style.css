@@ -1,0 +1,146 @@
+/* Все визуальные настройки интерфейса. Файл можно заменить целиком. */
+:root {
+  --akim-bg: #f3f6fa;
+  --akim-surface: #ffffff;
+  --akim-text: #172c42;
+  --akim-muted: #60748a;
+  --akim-accent: #137e70;
+  --akim-border: #dce5ee;
+  --akim-red: #b63640;
+  --akim-yellow: #85620d;
+  --akim-green: #14705e;
+}
+
+.stApp {
+  background: var(--akim-bg);
+  color: var(--akim-text);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+[data-testid="stHeader"] {
+  background: var(--akim-bg);
+}
+
+.block-container {
+  max-width: 1500px;
+  padding-top: 2.5rem;
+  padding-bottom: 2rem;
+}
+
+.eyebrow {
+  color: var(--akim-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.4rem;
+}
+
+h1, h2, h3, h4 {
+  color: var(--akim-text);
+  letter-spacing: -0.025em;
+}
+
+[data-testid="stMetric"] {
+  background: var(--akim-surface);
+  border: 1px solid var(--akim-border);
+  border-radius: 16px;
+  padding: 1rem 1.2rem;
+}
+
+[data-testid="stMetricLabel"] {
+  color: var(--akim-muted);
+}
+
+[data-testid="stMetricValue"] {
+  font-size: clamp(1.3rem, 2.5vw, 2.1rem);
+}
+
+[data-testid="stVerticalBlockBorderWrapper"] > div {
+  border-color: var(--akim-border);
+  border-radius: 14px;
+  background: var(--akim-surface);
+}
+
+[data-testid="stButton"] button {
+  border-radius: 10px;
+  border-color: var(--akim-border);
+  font-weight: 600;
+}
+
+[data-testid="stButton"] button[kind="primary"] {
+  background: var(--akim-accent);
+  color: #ffffff;
+  border-color: var(--akim-accent);
+}
+
+[data-testid="stButton"] button:focus-visible {
+  outline: 3px solid #438fe0;
+  outline-offset: 3px;
+}
+
+[data-testid="stButton"] button:disabled {
+  opacity: 0.5;
+}
+
+[data-testid="stCaptionContainer"] {
+  color: var(--akim-muted);
+}
+
+.indicator-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.48rem 0.75rem;
+  margin-bottom: 0.3rem;
+  border-left: 4px solid transparent;
+  border-radius: 7px;
+  background: var(--akim-surface);
+  font-size: 0.9rem;
+}
+
+.indicator-row strong {
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.indicator-row small {
+  display: block;
+  font-size: 0.7rem;
+}
+
+.indicator-row.critical {
+  color: var(--akim-red);
+  border-color: #d65b62;
+  background: #fff0f0;
+}
+
+.indicator-row.warning {
+  color: var(--akim-yellow);
+  border-color: #dab146;
+  background: #fff8e5;
+}
+
+.indicator-row.healthy {
+  border-color: #7fbcaa;
+}
+
+.indicator-row.healthy small {
+  color: var(--akim-green);
+}
+
+[data-testid="stTabs"] [role="tab"] {
+  font-weight: 600;
+  padding-inline: 1rem;
+}
+
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+  color: var(--akim-accent);
+}
+
+@media (max-width: 760px) {
+  .block-container { padding: 1rem; }
+  [data-testid="stMetric"] { padding: 0.75rem; }
+  .indicator-row { font-size: 0.82rem; }
+}

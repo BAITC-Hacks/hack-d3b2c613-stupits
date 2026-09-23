@@ -1,0 +1,37 @@
+{
+  "esil": {
+    "schools": 0,
+    "kindergartens": 0,
+    "clinics": 0,
+    "bus_stops": 0,
+    "parks": 0
+  },
+  "almaty": {
+    "schools": 0,
+    "kindergartens": 0,
+    "clinics": 0,
+    "bus_stops": 0,
+    "parks": 0
+  },
+  "saryarka": {
+    "schools": 0,
+    "kindergartens": 0,
+    "clinics": 0,
+    "bus_stops": 0,
+    "parks": 0
+  },
+  "baikonur": {
+    "schools": 0,
+    "kindergartens": 0,
+    "clinics": 0,
+    "bus_stops": 0,
+    "parks": 0
+  },
+  "nura": {
+    "schools": 0,
+    "kindergartens": 0,
+    "clinics": 0,
+    "bus_stops": 0,
+    "parks": 0
+  }
+}

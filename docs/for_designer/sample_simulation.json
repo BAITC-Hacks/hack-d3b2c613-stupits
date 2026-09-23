@@ -1,0 +1,583 @@
+{
+  "valid": true,
+  "errors": [],
+  "score": 56.54,
+  "score_breakdown": "0.7 * 58.08 + 0.3 * 52.96 - 1 * 0 = 56.54",
+  "cost": 95,
+  "budget": 100,
+  "budget_left": 5,
+  "D_avg": 58.08,
+  "min_district": {
+    "id": "nura",
+    "name": "Нура",
+    "D": 52.96
+  },
+  "N_crit": 0,
+  "baseline": {
+    "score": 52.56,
+    "D_avg": 56.86,
+    "min_district": {
+      "id": "nura",
+      "name": "Нура",
+      "D": 49.18
+    },
+    "N_crit": 2
+  },
+  "delta": {
+    "score": 3.99,
+    "D_avg": 1.22,
+    "min_D": 3.78,
+    "N_crit": -2
+  },
+  "measures": [
+    {
+      "measure": "M7",
+      "name": "Школа + детсад (модульное строительство)",
+      "direction": "social",
+      "direction_name": "Соцсфера",
+      "scope": "district",
+      "district": "nura",
+      "district_name": "Нура",
+      "cost": 24,
+      "lag_quarters": 3,
+      "realized_share": 0.625,
+      "effects_full": {
+        "S1": 16
+      },
+      "effects_realized": {
+        "S1": 10.0
+      },
+      "score_contribution": 1.45,
+      "contribution_parts": {
+        "via_D_avg": 0.12,
+        "via_min_D": 0.33,
+        "via_N_crit": 1.0
+      },
+      "score_without_it": 55.09,
+      "efficiency_per_10": 0.61
+    },
+    {
+      "measure": "M8",
+      "name": "Центр семейного здоровья / поликлиника",
+      "direction": "social",
+      "direction_name": "Соцсфера",
+      "scope": "district",
+      "district": "nura",
+      "district_name": "Нура",
+      "cost": 20,
+      "lag_quarters": 3,
+      "realized_share": 0.625,
+      "effects_full": {
+        "S2": 14
+      },
+      "effects_realized": {
+        "S2": 8.75
+      },
+      "score_contribution": 1.4,
+      "contribution_parts": {
+        "via_D_avg": 0.11,
+        "via_min_D": 0.29,
+        "via_N_crit": 1.0
+      },
+      "score_without_it": 55.15,
+      "efficiency_per_10": 0.7
+    },
+    {
+      "measure": "M10",
+      "name": "Освещение и камеры (расширение Safe City)",
+      "direction": "safety",
+      "direction_name": "Безопасность",
+      "scope": "district",
+      "district": "nura",
+      "district_name": "Нура",
+      "cost": 12,
+      "lag_quarters": 1,
+      "realized_share": 0.875,
+      "effects_full": {
+        "B1": 12,
+        "B2": 2
+      },
+      "effects_realized": {
+        "B1": 10.5,
+        "B2": 1.75
+      },
+      "score_contribution": 0.53,
+      "contribution_parts": {
+        "via_D_avg": 0.14,
+        "via_min_D": 0.38,
+        "via_N_crit": 0.0
+      },
+      "score_without_it": 56.01,
+      "efficiency_per_10": 0.44
+    },
+    {
+      "measure": "M12",
+      "name": "Единая цифровая платформа обращений",
+      "direction": "services",
+      "direction_name": "Сервисы",
+      "scope": "city",
+      "district": null,
+      "district_name": "весь город",
+      "cost": 14,
+      "lag_quarters": 1,
+      "realized_share": 0.875,
+      "effects_full": {
+        "C2": 5
+      },
+      "effects_realized": {
+        "C2": 4.38
+      },
+      "score_contribution": 0.51,
+      "contribution_parts": {
+        "via_D_avg": 0.33,
+        "via_min_D": 0.19,
+        "via_N_crit": 0.0
+      },
+      "score_without_it": 56.03,
+      "efficiency_per_10": 0.37
+    },
+    {
+      "measure": "M5",
+      "name": "Перевод частного сектора на чистое топливо",
+      "direction": "ecology",
+      "direction_name": "Экология",
+      "scope": "district",
+      "district": "saryarka",
+      "district_name": "Сарыарка",
+      "cost": 25,
+      "lag_quarters": 3,
+      "realized_share": 0.625,
+      "effects_full": {
+        "E2": 14,
+        "C1": 4
+      },
+      "effects_realized": {
+        "E2": 8.75,
+        "C1": 2.5
+      },
+      "score_contribution": 0.17,
+      "contribution_parts": {
+        "via_D_avg": 0.17,
+        "via_min_D": 0.0,
+        "via_N_crit": 0.0
+      },
+      "score_without_it": 56.37,
+      "efficiency_per_10": 0.07
+    }
+  ],
+  "measure_contributions_sum": 4.06,
+  "synergies": [
+    {
+      "pair": [
+        "M10",
+        "M12"
+      ],
+      "bonus": {
+        "B1": 2
+      },
+      "district": "nura",
+      "district_name": "Нура",
+      "note": "Фиксированный бонус, лагом не масштабируется"
+    }
+  ],
+  "directions_coverage": {
+    "Транспорт": [],
+    "Экология": [
+      "M5"
+    ],
+    "Соцсфера": [
+      "M7",
+      "M8"
+    ],
+    "Безопасность": [
+      "M10"
+    ],
+    "Сервисы": [
+      "M12"
+    ]
+  },
+  "critical_indicators": [],
+  "critical_resolved": [
+    {
+      "district": "nura",
+      "district_name": "Нура",
+      "indicator": "S1",
+      "indicator_name": "Школы и детсады",
+      "before": 38.0,
+      "after": 48.0
+    },
+    {
+      "district": "nura",
+      "district_name": "Нура",
+      "indicator": "S2",
+      "indicator_name": "Поликлиники и первичная медпомощь",
+      "before": 35.0,
+      "after": 43.75
+    }
+  ],
+  "critical_new": [],
+  "districts": [
+    {
+      "id": "esil",
+      "name": "Есиль",
+      "population_share": 0.27,
+      "profile": "Богатый, но с пробками на мостах и переполненными школами",
+      "D_before": 62.99,
+      "D_after": 63.43,
+      "D_delta": 0.44,
+      "indicators": {
+        "T1": {
+          "name": "Разгрузка дорог",
+          "before": 45.0,
+          "after": 45.0,
+          "delta": 0.0
+        },
+        "T2": {
+          "name": "Доступность общественного транспорта",
+          "before": 62.0,
+          "after": 62.0,
+          "delta": 0.0
+        },
+        "E1": {
+          "name": "Озеленение",
+          "before": 68.0,
+          "after": 68.0,
+          "delta": 0.0
+        },
+        "E2": {
+          "name": "Качество воздуха",
+          "before": 72.0,
+          "after": 72.0,
+          "delta": 0.0
+        },
+        "S1": {
+          "name": "Школы и детсады",
+          "before": 48.0,
+          "after": 48.0,
+          "delta": 0.0
+        },
+        "S2": {
+          "name": "Поликлиники и первичная медпомощь",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "B1": {
+          "name": "Безопасность улиц",
+          "before": 78.0,
+          "after": 78.0,
+          "delta": 0.0
+        },
+        "B2": {
+          "name": "Безопасность дорожного движения",
+          "before": 60.0,
+          "after": 60.0,
+          "delta": 0.0
+        },
+        "C1": {
+          "name": "Надёжность ЖКХ",
+          "before": 75.0,
+          "after": 75.0,
+          "delta": 0.0
+        },
+        "C2": {
+          "name": "Скорость решения обращений жителей",
+          "before": 70.0,
+          "after": 74.38,
+          "delta": 4.38
+        }
+      }
+    },
+    {
+      "id": "almaty",
+      "name": "Алматы",
+      "population_share": 0.24,
+      "profile": "Старый ЖКХ и пробки",
+      "D_before": 57.06,
+      "D_after": 57.5,
+      "D_delta": 0.44,
+      "indicators": {
+        "T1": {
+          "name": "Разгрузка дорог",
+          "before": 40.0,
+          "after": 40.0,
+          "delta": 0.0
+        },
+        "T2": {
+          "name": "Доступность общественного транспорта",
+          "before": 75.0,
+          "after": 75.0,
+          "delta": 0.0
+        },
+        "E1": {
+          "name": "Озеленение",
+          "before": 50.0,
+          "after": 50.0,
+          "delta": 0.0
+        },
+        "E2": {
+          "name": "Качество воздуха",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "S1": {
+          "name": "Школы и детсады",
+          "before": 60.0,
+          "after": 60.0,
+          "delta": 0.0
+        },
+        "S2": {
+          "name": "Поликлиники и первичная медпомощь",
+          "before": 65.0,
+          "after": 65.0,
+          "delta": 0.0
+        },
+        "B1": {
+          "name": "Безопасность улиц",
+          "before": 62.0,
+          "after": 62.0,
+          "delta": 0.0
+        },
+        "B2": {
+          "name": "Безопасность дорожного движения",
+          "before": 52.0,
+          "after": 52.0,
+          "delta": 0.0
+        },
+        "C1": {
+          "name": "Надёжность ЖКХ",
+          "before": 50.0,
+          "after": 50.0,
+          "delta": 0.0
+        },
+        "C2": {
+          "name": "Скорость решения обращений жителей",
+          "before": 60.0,
+          "after": 64.38,
+          "delta": 4.38
+        }
+      }
+    },
+    {
+      "id": "saryarka",
+      "name": "Сарыарка",
+      "population_share": 0.2,
+      "profile": "Смог от частного сектора, слабое озеленение",
+      "D_before": 54.65,
+      "D_after": 56.3,
+      "D_delta": 1.65,
+      "indicators": {
+        "T1": {
+          "name": "Разгрузка дорог",
+          "before": 50.0,
+          "after": 50.0,
+          "delta": 0.0
+        },
+        "T2": {
+          "name": "Доступность общественного транспорта",
+          "before": 70.0,
+          "after": 70.0,
+          "delta": 0.0
+        },
+        "E1": {
+          "name": "Озеленение",
+          "before": 42.0,
+          "after": 42.0,
+          "delta": 0.0
+        },
+        "E2": {
+          "name": "Качество воздуха",
+          "before": 40.0,
+          "after": 48.75,
+          "delta": 8.75
+        },
+        "S1": {
+          "name": "Школы и детсады",
+          "before": 62.0,
+          "after": 62.0,
+          "delta": 0.0
+        },
+        "S2": {
+          "name": "Поликлиники и первичная медпомощь",
+          "before": 68.0,
+          "after": 68.0,
+          "delta": 0.0
+        },
+        "B1": {
+          "name": "Безопасность улиц",
+          "before": 58.0,
+          "after": 58.0,
+          "delta": 0.0
+        },
+        "B2": {
+          "name": "Безопасность дорожного движения",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "C1": {
+          "name": "Надёжность ЖКХ",
+          "before": 45.0,
+          "after": 47.5,
+          "delta": 2.5
+        },
+        "C2": {
+          "name": "Скорость решения обращений жителей",
+          "before": 55.0,
+          "after": 59.38,
+          "delta": 4.38
+        }
+      }
+    },
+    {
+      "id": "baikonur",
+      "name": "Байконур",
+      "population_share": 0.13,
+      "profile": "Середняк без ярких перекосов",
+      "D_before": 56.63,
+      "D_after": 57.07,
+      "D_delta": 0.44,
+      "indicators": {
+        "T1": {
+          "name": "Разгрузка дорог",
+          "before": 52.0,
+          "after": 52.0,
+          "delta": 0.0
+        },
+        "T2": {
+          "name": "Доступность общественного транспорта",
+          "before": 68.0,
+          "after": 68.0,
+          "delta": 0.0
+        },
+        "E1": {
+          "name": "Озеленение",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "E2": {
+          "name": "Качество воздуха",
+          "before": 50.0,
+          "after": 50.0,
+          "delta": 0.0
+        },
+        "S1": {
+          "name": "Школы и детсады",
+          "before": 58.0,
+          "after": 58.0,
+          "delta": 0.0
+        },
+        "S2": {
+          "name": "Поликлиники и первичная медпомощь",
+          "before": 60.0,
+          "after": 60.0,
+          "delta": 0.0
+        },
+        "B1": {
+          "name": "Безопасность улиц",
+          "before": 52.0,
+          "after": 52.0,
+          "delta": 0.0
+        },
+        "B2": {
+          "name": "Безопасность дорожного движения",
+          "before": 58.0,
+          "after": 58.0,
+          "delta": 0.0
+        },
+        "C1": {
+          "name": "Надёжность ЖКХ",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "C2": {
+          "name": "Скорость решения обращений жителей",
+          "before": 58.0,
+          "after": 62.38,
+          "delta": 4.38
+        }
+      }
+    },
+    {
+      "id": "nura",
+      "name": "Нура",
+      "population_share": 0.16,
+      "profile": "Главный аутсайдер по соцсфере и транспорту",
+      "D_before": 49.18,
+      "D_after": 52.96,
+      "D_delta": 3.78,
+      "indicators": {
+        "T1": {
+          "name": "Разгрузка дорог",
+          "before": 55.0,
+          "after": 55.0,
+          "delta": 0.0
+        },
+        "T2": {
+          "name": "Доступность общественного транспорта",
+          "before": 40.0,
+          "after": 40.0,
+          "delta": 0.0
+        },
+        "E1": {
+          "name": "Озеленение",
+          "before": 45.0,
+          "after": 45.0,
+          "delta": 0.0
+        },
+        "E2": {
+          "name": "Качество воздуха",
+          "before": 65.0,
+          "after": 65.0,
+          "delta": 0.0
+        },
+        "S1": {
+          "name": "Школы и детсады",
+          "before": 38.0,
+          "after": 48.0,
+          "delta": 10.0
+        },
+        "S2": {
+          "name": "Поликлиники и первичная медпомощь",
+          "before": 35.0,
+          "after": 43.75,
+          "delta": 8.75
+        },
+        "B1": {
+          "name": "Безопасность улиц",
+          "before": 55.0,
+          "after": 67.5,
+          "delta": 12.5
+        },
+        "B2": {
+          "name": "Безопасность дорожного движения",
+          "before": 50.0,
+          "after": 51.75,
+          "delta": 1.75
+        },
+        "C1": {
+          "name": "Надёжность ЖКХ",
+          "before": 60.0,
+          "after": 60.0,
+          "delta": 0.0
+        },
+        "C2": {
+          "name": "Скорость решения обращений жителей",
+          "before": 50.0,
+          "after": 54.38,
+          "delta": 4.38
+        }
+      }
+    }
+  ],
+  "notes": [
+    "Score = 0.7 * D_avg + 0.3 * min(D_d) - 1 * N_crit. D_d — оценка района (сумма показателей с весами), D_avg — средняя оценка по городу с весами долей населения, min(D_d) — оценка самого слабого района, N_crit — число показателей строго ниже 40 (штраф за каждый).",
+    "Мера срабатывает с задержкой (лаг): за горизонт 8 кварталов реализуется доля (8 - лаг) / 8 полного эффекта — это realized_share, итог — effects_realized.",
+    "score_contribution — вклад меры: Score всего набора минус Score этого же набора без неё (вместе с мерой пропадают и её синергии). Разложение: via_D_avg + via_min_D + via_N_crit.",
+    "Вклады мер не обязаны складываться в общий прирост Score: мешают min() по районам, штраф за критические значения и синергии, которые входят во вклад обеих мер пары.",
+    "efficiency_per_10 — вклад меры в Score на каждые 10 у.е. её стоимости."
+  ]
+}

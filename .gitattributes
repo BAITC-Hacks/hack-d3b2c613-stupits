@@ -1,0 +1,4 @@
+# Переводы строк для скриптов запуска: bash требует LF, cmd — CRLF
+*.sh        text eol=lf
+*.bat       text eol=crlf
+Dockerfile  text eol=lf

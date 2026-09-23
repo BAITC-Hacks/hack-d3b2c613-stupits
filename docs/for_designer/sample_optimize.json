@@ -1,0 +1,210 @@
+{
+  "results": [
+    {
+      "rank": 1,
+      "score": 57.24,
+      "score_delta": 4.68,
+      "cost": 98,
+      "budget_left": 2,
+      "decisions": [
+        {
+          "measure": "M2",
+          "district": null
+        },
+        {
+          "measure": "M3",
+          "district": "nura"
+        },
+        {
+          "measure": "M8",
+          "district": "nura"
+        },
+        {
+          "measure": "M9",
+          "district": "nura"
+        },
+        {
+          "measure": "M14",
+          "district": null
+        }
+      ],
+      "summary": "M2 (весь город) + M3 (Нура) + M8 (Нура) + M9 (Нура) + M14 (весь город)",
+      "D_avg": 58.58,
+      "min_district": {
+        "id": "nura",
+        "name": "Нура",
+        "D": 54.09
+      },
+      "N_crit": 0,
+      "synergies": []
+    },
+    {
+      "rank": 2,
+      "score": 57.23,
+      "score_delta": 4.67,
+      "cost": 91,
+      "budget_left": 9,
+      "decisions": [
+        {
+          "measure": "M3",
+          "district": "nura"
+        },
+        {
+          "measure": "M4",
+          "district": "nura"
+        },
+        {
+          "measure": "M8",
+          "district": "nura"
+        },
+        {
+          "measure": "M9",
+          "district": "nura"
+        },
+        {
+          "measure": "M14",
+          "district": null
+        }
+      ],
+      "summary": "M3 (Нура) + M4 (Нура) + M8 (Нура) + M9 (Нура) + M14 (весь город)",
+      "D_avg": 58.27,
+      "min_district": {
+        "id": "nura",
+        "name": "Нура",
+        "D": 54.78
+      },
+      "N_crit": 0,
+      "synergies": []
+    },
+    {
+      "rank": 3,
+      "score": 57.21,
+      "score_delta": 4.65,
+      "cost": 100,
+      "budget_left": 0,
+      "decisions": [
+        {
+          "measure": "M3",
+          "district": "nura"
+        },
+        {
+          "measure": "M7",
+          "district": "nura"
+        },
+        {
+          "measure": "M8",
+          "district": "nura"
+        },
+        {
+          "measure": "M10",
+          "district": "nura"
+        },
+        {
+          "measure": "M12",
+          "district": null
+        }
+      ],
+      "summary": "M3 (Нура) + M7 (Нура) + M8 (Нура) + M10 (Нура) + M12 (весь город)",
+      "D_avg": 58.16,
+      "min_district": {
+        "id": "nura",
+        "name": "Нура",
+        "D": 54.98
+      },
+      "N_crit": 0,
+      "synergies": [
+        "M10 + M12"
+      ]
+    },
+    {
+      "rank": 4,
+      "score": 57.19,
+      "score_delta": 4.63,
+      "cost": 88,
+      "budget_left": 12,
+      "decisions": [
+        {
+          "measure": "M3",
+          "district": "nura"
+        },
+        {
+          "measure": "M8",
+          "district": "nura"
+        },
+        {
+          "measure": "M9",
+          "district": "nura"
+        },
+        {
+          "measure": "M10",
+          "district": "nura"
+        },
+        {
+          "measure": "M14",
+          "district": null
+        }
+      ],
+      "summary": "M3 (Нура) + M8 (Нура) + M9 (Нура) + M10 (Нура) + M14 (весь город)",
+      "D_avg": 58.26,
+      "min_district": {
+        "id": "nura",
+        "name": "Нура",
+        "D": 54.69
+      },
+      "N_crit": 0,
+      "synergies": []
+    },
+    {
+      "rank": 5,
+      "score": 57.17,
+      "score_delta": 4.61,
+      "cost": 90,
+      "budget_left": 10,
+      "decisions": [
+        {
+          "measure": "M3",
+          "district": "nura"
+        },
+        {
+          "measure": "M8",
+          "district": "nura"
+        },
+        {
+          "measure": "M9",
+          "district": "nura"
+        },
+        {
+          "measure": "M12",
+          "district": null
+        },
+        {
+          "measure": "M14",
+          "district": null
+        }
+      ],
+      "summary": "M3 (Нура) + M8 (Нура) + M9 (Нура) + M12 (весь город) + M14 (весь город)",
+      "D_avg": 58.52,
+      "min_district": {
+        "id": "nura",
+        "name": "Нура",
+        "D": 54.03
+      },
+      "N_crit": 0,
+      "synergies": []
+    }
+  ],
+  "errors": [],
+  "message": "Полный перебор: из 694 395 допустимых сценариев показаны 5 лучших.",
+  "constraints": {
+    "exclude": [],
+    "include": [],
+    "budget": 100
+  },
+  "stats": {
+    "measure_sets": 2002,
+    "measure_sets_passed": 1181,
+    "scenarios_total": 1407050,
+    "scenarios_valid": 694395,
+    "seconds": 0.44
+  }
+}

@@ -1,0 +1,16 @@
+# Не копируем в образ секреты, окружения, кэши и локальные файлы
+.git
+.venv
+venv
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+__pycache__
+*.py[cod]
+.pytest_cache
+.vscode
+.idea
+.claude
+*.zip
+*.log

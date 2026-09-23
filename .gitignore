@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Виртуальные окружения (создаются run.bat / run.sh)
+.venv/
+venv/
+
+# Секреты: настоящий ключ API хранится только в .env
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Личные настройки редакторов и ИИ-ассистентов
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Архивы, выгрузки и логи, не относящиеся к коду
+*.zip
+*.log
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+desktop.ini
