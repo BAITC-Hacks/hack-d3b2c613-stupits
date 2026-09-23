@@ -140,6 +140,10 @@ function flyDistrict(id, close = false) {
 function selectDistrict(id) {
   if (!district(id) && !geojson?.features.some(f => f.properties.id === id)) return;
   state.district = id;
+  // Клик задаёт район новых проектов; решения, уже лежащие в плане, не меняем.
+  for (const project of catalog.measures) {
+    if (project.scope !== "city") state.targets[project.id] = id;
+  }
   state.tab = "overview";
   render();
   $("panel-scroll").scrollTop = 0;

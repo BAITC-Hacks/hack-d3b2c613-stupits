@@ -324,6 +324,8 @@ function invalidateResult() {
 function quickErrors(project, target) {
   if (state.plan.some((item) => item.measure === project.id))
     return "Проект уже в плане";
+  if (project.scope !== "city" && !district(target))
+    return "В этом районе нет расчётных данных ТЗ. Выберите другой район в карточке.";
   if (state.plan.length >= catalog.num_decisions)
     return `Выбрано ${catalog.num_decisions} проектов — сначала уберите один`;
   if (!state.status) return "Ожидаем проверку бюджета";
@@ -396,7 +398,7 @@ async function addProject(id) {
   const target =
     project.scope === "city"
       ? null
-      : state.targets[id] || catalog.districts[0].id;
+      : state.targets[id] || state.district || catalog.districts[0].id;
   const reason = quickErrors(project, target);
   if (reason) return toast(reason);
   if (
@@ -410,6 +412,33 @@ async function removeProject(id) {
 }
 async function clearPlan() {
   await commitPlan([]);
+}
+async function resetDemo() {
+  if (state.bootstrapBusy || state.libraryBusy) return;
+  // bootstrap отменяет старые запросы и пересчитывает базу; библиотеку не удаляем.
+  state.plan = [];
+  state.event = null;
+  state.district = null;
+  state.targets = {};
+  state.filter = "all";
+  state.tab = "overview";
+  state.mapMetric = "D";
+  state.threeD = false;
+  state.tour = -1;
+  state.optEvent = null;
+  state.optRobust = false;
+  state.optBaseline = null;
+  state.libraryError = null;
+  clearTimeout(toastTimer);
+  $("tour").classList.add("hidden");
+  $("toggle-3d").classList.remove("active");
+  $("toggle-3d").setAttribute("aria-pressed", "false");
+  $("map-hint").classList.remove("hidden");
+  $("panel-scroll").scrollTop = 0;
+  map?.stop();
+  await bootstrap(null, { plan: [] });
+  flyOverview();
+  if (state.live) toast("Сброшено: исходный город, пустой план и полный бюджет.");
 }
 function setTab(tab) {
   state.tab = tab;
@@ -511,6 +540,7 @@ function renderHeader() {
   }
   $("map-phase").textContent = state.after ? "Стало" : "Было";
   $("clear-plan").disabled = locked() || !state.plan.length;
+  $("reset-demo-button").disabled = state.bootstrapBusy || state.libraryBusy;
   $("events-button").disabled = state.bootstrapBusy;
   $("tour-button").disabled = locked();
   if ($("saved-plans-button"))
@@ -558,7 +588,7 @@ function renderOverview() {
   const weakest = baseline.min_district;
   $("panel").innerHTML =
     `${errorBox()}${completionWarning()}<div class="section-heading"><h3>Ваш город. Ваши решения.</h3></div>
-    <p class="intro">Выберите ровно ${catalog.num_decisions} проектов в пределах бюджета. Район на карте нужен для просмотра; место проекта выбирается отдельно.</p>
+    <p class="intro">Выберите ровно ${catalog.num_decisions} проектов в пределах бюджета. Нажмите на район — он подставится в новые районные проекты. Уже выбранные проекты сохранят свои районы.</p>
     <div class="section-heading"><span class="eyebrow">Районы Астаны</span><span class="muted">Оценка D</span></div>${districtCards()}
     <div class="mission-card"><div class="mission-title">${icon("spark")} С чего начать?</div>
     <p>Самый слабый район — ${esc(weakest?.name)}. Изучите его показатели и проверьте план из задания.</p>
@@ -601,7 +631,8 @@ function renderDistrict() {
       (item) => item.properties?.id === state.district,
     );
     $("panel").innerHTML =
-      `<button class="back" id="back-city">${icon("back")} Все районы</button><span class="eyebrow">Географический район</span><h2>${esc(feature?.properties?.name || state.district)}</h2><div class="advisor-notice">В учебном датасете этого района нет. Его границы показаны для географического контекста; оценка D, показатели и размещение проектов здесь недоступны.</div><p>Городской Score рассчитывается по районам, для которых движок содержит данные.</p>${geographicSource(feature)}`;
+      `<button class="back" id="back-city">${icon("back")} Все районы</button><span class="eyebrow">Географический район</span><h2>${esc(feature?.properties?.name || state.district)}</h2><div class="advisor-notice">В учебном датасете этого района нет. Он выбран для новых проектов, но добавление районной меры недоступно до выбора района с расчётными данными.</div><p>Оценка D и показатели отсутствуют. Городской Score рассчитывается по районам, для которых движок содержит данные.</p><button id="district-projects" class="btn primary">Посмотреть проекты ${icon("arrow")}</button>${geographicSource(feature)}`;
+    $("district-projects").onclick = () => setTab("projects");
     $("back-city").onclick = () => {
       state.district = null;
       render();
@@ -615,7 +646,7 @@ function renderDistrict() {
     <div class="district-head"><div><span class="eyebrow">Район для просмотра</span><h2>${esc(row.name)}</h2></div>
     <div class="district-big-score"><strong>${fmt(districtScore(shown))}</strong><span>оценка района</span></div></div>
     <p class="district-profile">${esc(row.profile)}</p><p class="small muted">Доля населения: ${new Intl.NumberFormat("ru-RU", { style: "percent" }).format(row.population_share)}.</p>
-    <p class="result-note">Просмотр района не меняет размещение проектов.</p>
+    <p class="result-note">Этот район подставлен в новые проекты. Уже выбранные проекты сохраняют свои районы.</p>
     <div class="section-heading"><h3>Показатели района</h3><span class="muted">${Object.keys(shown.indicators).length} показателей</span></div>
     ${Object.entries(shown.indicators).map(indicatorHtml).join("")}
     <div class="district-actions"><button id="district-projects" class="btn primary">Выбрать проекты ${icon("arrow")}</button><button id="district-3d" class="btn">Посмотреть район ближе</button></div>`;
@@ -633,7 +664,7 @@ function renderProjects() {
   );
   $("panel").innerHTML =
     `${errorBox()}${completionWarning()}<div class="section-heading"><h3>Инвестиции в город</h3><span class="muted">${state.plan.length} из ${catalog.num_decisions}</span></div>
-    <p class="small muted">Район реализации выбирается в каждой карточке. Просмотр карты на него не влияет.</p>
+    <p class="small muted">Выбранный на карте район подставляется в новые проекты. При необходимости измените его в карточке. Уже выбранные проекты сохраняют свои районы.</p>
     <div class="filters">${[["all", "Все"], ...Object.entries(catalog.directions)].map(([key, name]) => `<button class="filter ${state.filter === key ? "active" : ""}" data-filter="${esc(key)}">${esc(name)}</button>`).join("")}</div>
     ${projects
       .map((project) => {
@@ -641,8 +672,12 @@ function renderProjects() {
         const target =
           chosen?.district ||
           state.targets[project.id] ||
+          state.district ||
           catalog.districts[0].id;
         const reason = quickErrors(project, target);
+        const unmappedTarget = !district(target)
+          ? geojson?.features?.find((item) => item.properties?.id === target)
+          : null;
         return `<article class="project-card ${chosen ? "chosen" : ""}"><div class="project-meta"><div class="row"><span class="category-icon">${icon(directionIcon[project.direction])}</span>${esc(catalog.directions[project.direction])}</div>
         <div class="project-cost">${fmt(project.cost, 0)} <span>у.е.</span></div></div><h4>${esc(project.name)}</h4>
         <div class="project-effects">${Object.entries(project.effects)
@@ -653,7 +688,7 @@ function renderProjects() {
           .join(
             " · ",
           )}<br>Лаг: ${project.lag} кв. · эффекты до учёта задержки</div>
-        <div class="project-bottom">${project.scope === "city" ? '<span class="city-scope">Во всех районах</span>' : `<select aria-label="Район реализации ${esc(project.name)}" data-target="${esc(project.id)}" ${chosen || locked() ? "disabled" : ""}>${catalog.districts.map((row) => `<option value="${esc(row.id)}" ${row.id === target ? "selected" : ""}>${esc(row.name)}</option>`).join("")}</select>`}
+        <div class="project-bottom">${project.scope === "city" ? '<span class="city-scope">Во всех районах</span>' : `<select aria-label="Район реализации ${esc(project.name)}" data-target="${esc(project.id)}" ${chosen || locked() ? "disabled" : ""}>${unmappedTarget ? `<option value="${esc(target)}" selected disabled>${esc(unmappedTarget.properties.name)} — нет данных ТЗ</option>` : ""}${catalog.districts.map((row) => `<option value="${esc(row.id)}" ${row.id === target ? "selected" : ""}>${esc(row.name)}</option>`).join("")}</select>`}
         <button class="add-project" data-${chosen ? "remove" : "add"}="${esc(project.id)}" ${locked() || (!chosen && reason) ? "disabled" : ""} title="${esc(chosen ? "Убрать из плана" : reason || "Добавить проект")}">${chosen ? "✓ В плане" : "＋ Добавить"}</button></div>
         ${chosen ? `<div class="reason">${project.scope === "city" ? "Мера действует во всех районах расчётной модели." : "Для смены района уберите проект и добавьте заново."}</div>` : reason ? `<div class="reason">${esc(reason)}</div>` : ""}</article>`;
       })
@@ -677,6 +712,7 @@ function renderProjects() {
       select.onchange = () => {
         state.targets[select.dataset.target] = select.value;
         renderProjects();
+        persistSession();
       };
     });
   bindProjectButtons($("panel"));
@@ -1767,7 +1803,8 @@ async function bootstrap(event = null, options = {}) {
     )
       state.district = null;
     for (const [mid, target] of Object.entries(state.targets))
-      if (!district(target)) delete state.targets[mid];
+      if (!district(target) && !geojson?.features?.some((item) => item.properties?.id === target))
+        delete state.targets[mid];
     renderEvent();
     connection(true, "Движок подключён");
     const approximate = geojson?.features?.some(
@@ -1896,6 +1933,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("calculate-button").onclick = calculate;
   $("clear-plan").onclick = clearPlan;
+  $("reset-demo-button").onclick = resetDemo;
   $("show-before").onclick = () => setPhase(false);
   $("show-after").onclick = () => setPhase(true);
   $("events-button").onclick = openEvents;
