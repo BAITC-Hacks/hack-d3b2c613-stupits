@@ -50,11 +50,7 @@
         <div class="score-value-line">
           <strong class="score-value" id="city-score">—</strong
           ><span id="score-delta" class="score-delta hidden"></span>
-          <div class="score-spark" aria-hidden="true">
-            <i style="height: 7px"></i><i style="height: 10px"></i
-            ><i style="height: 9px"></i><i style="height: 15px"></i
-            ><i style="height: 17px"></i><i style="height: 22px"></i>
-          </div>
+          <div id="district-score-bars" class="score-spark" aria-hidden="true" title="Оценки районов из расчёта движка"></div>
         </div>
         <div id="score-caption" class="score-caption">
           Каждый район важен. Начните с самого уязвимого.
@@ -97,6 +93,7 @@
           <select id="map-metric-select" aria-label="Показатель карты"><option value="D">Оценка района, D</option></select>
         </label>
         <p id="map-metric-note" class="map-metric-note">Показатели учебной модели. Чем выше, тем лучше.</p>
+        <button id="model-insights-button" class="text-button map-insights-button">Риски и компромиссы</button>
       </div>
       <div class="compare" aria-label="Состояние карты">
         <button id="show-before" class="active" aria-pressed="true">Было</button

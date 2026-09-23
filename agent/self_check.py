@@ -6,6 +6,7 @@ HTTP заменяется локальным транспортом; расчё�
 
 from copy import deepcopy
 from types import SimpleNamespace
+import importlib.util
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ from openai import OpenAI
 
 import engine
 from agent import advisor
-from agent.evidence import EvidenceError, render_grounded_answer
+from agent.evidence import EvidenceError, qualitative_comment, render_grounded_answer
 from agent.prompts import AUTO_QUESTION
 from agent.tools import EngineTools
 from legacy.ui.engine_adapter import EngineAdapter, EngineUnavailable
@@ -26,6 +27,8 @@ from legacy.ui.engine_adapter import EngineAdapter, EngineUnavailable
 SETTINGS = {"OPENAI_API_KEY": "test-only", "OPENAI_MODEL": "test-model",
             "OPENAI_BASE_URL": "https://compatible.invalid/v1"}
 EMPTY_SETTINGS = {key: "" for key in SETTINGS}
+HAS_STREAMLIT = importlib.util.find_spec("streamlit") is not None
+LEGACY_SKIP_REASON = "Архивный Streamlit не установлен; основной web-интерфейс проверяется отдельно."
 
 
 def tool_message(name, arguments, call_id="call_test"):
@@ -120,7 +123,7 @@ class AdvisorChecks(unittest.TestCase):
                 context = json.loads(payload["messages"][-1]["content"])
                 self.assertEqual(context["selected_event_id"], "E2")
                 return tool_message("baseline", {})
-            return text_message("Score {{e1:/score}}; база {{e2:/score}}.")
+            return text_message("Буран требует внимания к доступности городских услуг.")
 
         with patch.object(self, "result", event_result):
             response, requests = self.run_api(responder)
@@ -152,9 +155,9 @@ class AdvisorChecks(unittest.TestCase):
             self.assertEqual(critical[0]["district"], "almaty")
             self.assertEqual(critical[0]["value"]["value"], 39.38)
             self.assertIn("ПОСЛЕ", facts["instruction"])
-            return text_message("Осталось критических показателей: {{e2:/N_crit}}. "
-                                "ЖКХ Алматы — {{e2:/critical_indicators/0/value}}. "
-                                "Слабейший район — Нура, D {{e2:/min_district/D}}.")
+            return text_message("После проектов осталось 3 критических показателя. "
+                                "Слабейший район имеет D 49.18. "
+                                "Коммунальные услуги Алматы остаются уязвимыми для жителей.")
 
         with patch.object(self, "result", current):
             response, requests = self.run_api(responder, "Какие риски остались после события?")
@@ -166,17 +169,23 @@ class AdvisorChecks(unittest.TestCase):
         self.assertIn("39,38", response["answer"])
         self.assertIn("54,09", response["answer"])
         self.assertNotIn("49,18", response["answer"])
+        self.assertNotIn("49.18", response["answer"])
+        self.assertIn("Критических показателей осталось: 1", response["answer"])
+        self.assertEqual(response["ai_comment"], "Коммунальные услуги Алматы остаются уязвимыми для жителей.")
 
     def test_nura_baseline_question_is_not_rerouted_to_current_risks(self):
         def responder(payload, turn):
             if turn == 1:
-                self.assertEqual(payload["tool_choice"], "required")
-                return tool_message("baseline", {})
-            return text_message("До проектов оценка Нуры — {{e2:/min_district/D}}.")
+                self.assertEqual(payload["tool_choice"]["function"]["name"], "baseline")
+                # Некоторые провайдеры игнорируют принудительный выбор функции.
+                return tool_message("simulate", {"decisions": self.plan})
+            return text_message("Слабые социальные услуги Нуры снижают качество жизни района.")
 
         response, _ = self.run_api(responder, "Почему Нура так важна?")
         self.assertFalse(response["offline"])
         self.assertEqual(response["tool_calls"][-1]["name"], "baseline")
+        self.assertEqual(response["tool_calls"][-1]["requested_name"], "simulate")
+        self.assertIn("49,18", response["answer"])
         self.assertFalse(advisor._current_plan_risks("Какие критические показатели были до проектов?"))
 
     def test_explicit_event_overrides_inferred_context_and_offline_keeps_it(self):
@@ -263,7 +272,7 @@ class AdvisorChecks(unittest.TestCase):
                 chosen.extend(last["facts"]["results"][0]["decisions"])
                 self.assertEqual(last["facts"]["results"][0]["score"]["ref"], "{{e2:/results/0/score}}")
             self.assertEqual(payload["tool_choice"], "none")
-            return text_message("Проверенный вариант: оценка {{e2:/results/0/score}}, стоимость {{e2:/results/0/cost}} у.е.")
+            return text_message("Школа в Нуре помогает жителям получать образование ближе к дому.")
 
         response, requests = self.run_api(responder, "Без ЛРТ, школа в Нуре, бюджет до 80")
         self.assertFalse(response["offline"])
@@ -280,7 +289,7 @@ class AdvisorChecks(unittest.TestCase):
                 self.assertEqual(payload["tool_choice"]["function"]["name"], "optimize")
                 # Модель не должна превращать поиск альтернативы в фиксацию исходного плана.
                 return tool_message("optimize", {"constraints": {"include": self.plan, "budget": 95}})
-            return text_message("Оценка текущего плана {{e1:/score}}; найденный план {{e2:/results/0/score}}.")
+            return text_message("Социальные проекты помогают жителям Нуры, но требуют транспортного компромисса.")
         response, requests = self.run_api(responder, AUTO_QUESTION)
         self.assertFalse(response["offline"])
         self.assertEqual(len(requests), 2)
@@ -302,7 +311,7 @@ class AdvisorChecks(unittest.TestCase):
             self.assertEqual(facts["alternative_reference"], "{{e2:/results/1/score}}")
             self.assertNotIn("results", facts["facts"])
             self.assertEqual(facts["facts"]["recommended_plan"]["decisions"], plans[1]["decisions"])
-            return text_message("Оценка другого состава {{e2:/results/1/score}}.")
+            return text_message("Другой состав меняет баланс городской инфраструктуры и услуг.")
 
         with patch.object(self, "result", engine.simulate(current)):
             response, _ = self.run_api(responder, AUTO_QUESTION)
@@ -315,7 +324,7 @@ class AdvisorChecks(unittest.TestCase):
                 return tool_message("baseline", {})
             if turn == 2:
                 return text_message("Оценка будет 999999.")
-            return text_message("Оценка по движку — {{e1:/score}}; база — {{e2:/score}}.")
+            return text_message("Поддержка социальных услуг важна для жителей слабого района.")
         response, requests = self.run_api(responder)
         self.assertFalse(response["offline"])
         self.assertEqual(len(requests), 3)
@@ -402,7 +411,7 @@ class AdvisorChecks(unittest.TestCase):
 
                 self.assertTrue(contains_checked_plan(contexts))
                 return tool_message("baseline", {})
-            return text_message("Исходная оценка {{e2:/score}}.")
+            return text_message("Исходные различия районов помогают понять потребность в социальных услугах.")
 
         response, requests = self.run_api(responder, "А этот вариант дешевле?", history=history, checked_plans=plans)
         self.assertFalse(response["offline"])
@@ -459,6 +468,80 @@ class AdvisorChecks(unittest.TestCase):
             with self.assertRaises(EvidenceError, msg=draft):
                 render_grounded_answer(draft, evidence)
 
+    def test_qualitative_comment_does_not_publish_numeric_claims_with_wrong_labels(self):
+        # Все эти числа могут присутствовать в evidence. Совпадение значения
+        # не доказывает, что стоимость, район и сценарий названы правильно.
+        for claim in ("Стоимость плана 56.54 у.е.", "Score города 95.",
+                      "Есиль: D 49.18.", "После проектов осталось три проблемы.",
+                      "Стоимость {{e1:/score}} у.е.", "Сарайшык улучшился."):
+            comment, omitted = qualitative_comment(claim + " Поддержка медицины помогает жителям.")
+            self.assertTrue(omitted, claim)
+            self.assertEqual(comment, "Поддержка медицины помогает жителям.", claim)
+        self.assertEqual(qualitative_comment("Сотрудники замечают пятна загрязнения."),
+                         ("Сотрудники замечают пятна загрязнения.", False))
+        with self.assertRaises(EvidenceError):
+            qualitative_comment("Стоимость 56.54 у.е. Score 95.")
+
+    def test_online_numeric_facts_are_engine_report_not_cross_field_model_text(self):
+        def responder(payload, turn):
+            if turn == 1:
+                return tool_message("simulate", {"decisions": self.plan})
+            return text_message("Стоимость плана 56.54 у.е. Score города 95. "
+                                "Есиль: D 49.18. Поддержка медицины помогает жителям.")
+
+        response, requests = self.run_api(responder)
+        self.assertFalse(response["offline"])
+        self.assertEqual(len(requests), 2)  # Удаление ошибочных чисел не требует API repair.
+        self.assertTrue(response["numeric_claims_replaced"])
+        self.assertEqual(response["answer_mode"], "verified_report_with_ai_comment")
+        self.assertEqual(response["ai_comment"], "Поддержка медицины помогает жителям.")
+        self.assertIn("Оценка города — 56,54", response["answer"])
+        self.assertIn("Стоимость — 95 у.е.", response["answer"])
+        self.assertNotIn("Score города 95", response["answer"])
+        self.assertNotIn("Есиль: D 49.18", response["answer"])
+
+    def test_online_search_never_borrows_current_cost_or_relabels_scenarios(self):
+        def responder(payload, turn):
+            if turn == 1:
+                return tool_message("optimize", {"constraints": {"exclude": ["M3"], "budget": 80}})
+            return text_message("Найденный план стоит 95, его Score 56.54. "
+                                "Отказ от ЛРТ меняет транспортные приоритеты.")
+
+        response, requests = self.run_api(responder, "Найди план без ЛРТ с бюджетом до 80")
+        self.assertFalse(response["offline"])
+        self.assertEqual(len(requests), 2)
+        self.assertIn("стоимость — 72 у.е.", response["answer"])
+        self.assertIn("Score — 56,87", response["answer"])
+        self.assertIn("лимит бюджета — 80 у.е.", response["answer"])
+        self.assertNotIn("95", response["answer"])
+        self.assertNotIn("56.54", response["answer"])
+
+    def test_validating_alternative_does_not_publish_score_of_current_plan(self):
+        other = engine.optimize(top_n=1)["results"][0]["decisions"]
+
+        def responder(payload, turn):
+            if turn == 1:
+                return tool_message("validate", {"decisions": other})
+            return text_message("План допустим. Его оценка 56.54. Для оценки последствий нужен расчёт.")
+
+        response, _ = self.run_api(responder, "Проверь другой набор")
+        self.assertFalse(response["offline"])
+        self.assertIn("Валидация не рассчитывает его Score", response["answer"])
+        self.assertNotIn("56.54", response["answer"])
+        self.assertNotIn("56,54", response["answer"])
+
+    def test_saray_shyk_has_no_model_score_or_api_call(self):
+        for question in ("Какой Score у Сарайшыка?", "Как улучшить Сарайшық?", "Score Sarayshyq?"):
+            with patch.object(advisor, "_create_client") as factory, \
+                 patch.object(advisor, "read_settings") as settings:
+                response = advisor.ask_advisor(question, self.result)
+            factory.assert_not_called()
+            settings.assert_not_called()
+            self.assertEqual(response["reason_code"], "unmodeled_district")
+            self.assertIn("нет показателей", response["answer"])
+            self.assertFalse(any(char.isnumeric() for char in response["answer"]))
+            self.assertEqual([call["name"] for call in response["tool_calls"]], ["baseline"])
+
     def test_literal_number_roles_and_small_numerals_match_engine_fields(self):
         evidence = {"e0": {"budget": 100, "num_decisions": 5},
                     "e1": {"score": 52.56, "N_crit": 2, "remaining_critical": 0},
@@ -488,6 +571,7 @@ class AdvisorChecks(unittest.TestCase):
         self.assertEqual(negative["ref"], "{{" + actual["evidence_id"] + f":/measures/{index}/effects_realized/T1" + "}}")
         self.assertEqual(render_grounded_answer(negative["ref"], tools.evidence), "-1,75")
 
+    @unittest.skipUnless(HAS_STREAMLIT, LEGACY_SKIP_REASON)
     def test_conversation_keeps_checked_plan_after_more_than_six_plain_messages(self):
         from legacy.ui import advisor_panel
 
@@ -552,6 +636,7 @@ class AdvisorChecks(unittest.TestCase):
         with self.assertRaises(EngineUnavailable):
             adapter.validate(self.plan)
 
+    @unittest.skipUnless(HAS_STREAMLIT, LEGACY_SKIP_REASON)
     def test_streamlit_auto_analysis_is_cached_and_invalidated(self):
         from streamlit.testing.v1 import AppTest
         from agent.offline import offline_response

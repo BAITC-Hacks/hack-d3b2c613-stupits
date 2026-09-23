@@ -44,6 +44,10 @@ function geographicName(id) {
 function syncMapMetric() {
   const select = $("map-metric-select");
   if (!select || !catalog) return;
+  // Маленькая диаграмма также отражает реальные D, а не декоративный рост.
+  const bars = $("district-score-bars");
+  if (bars) bars.innerHTML = (state.result?.districts || baseline?.districts || []).map(row =>
+    `<i title="${esc(row.name)}: ${fmt(districtScore(row))}" style="height:${Math.max(0, Math.min(100, districtScore(row))) * 0.35}px"></i>`).join("");
   const keys = Object.keys(catalog.indicators);
   if (select.options.length !== keys.length + 1) {
     select.innerHTML = '<option value="D">Оценка района, D</option>' + keys.map(key =>
@@ -144,6 +148,7 @@ function selectDistrict(id) {
 }
 function updateMap() {
   syncMapMetric();
+  if (state.drawer === "insights") openModelInsights();
   if (!mapReady) return;
   popup?.remove();
   hovered = null;
@@ -479,3 +484,44 @@ function cityBounds() {
   for (const feature of geojson.features) bounds.extend(featureBounds(feature));
   return bounds;
 }
+
+// Объясняем последствия на уровне разрешения модели — район и показатель.
+// Уличный трафик или длительность пробок из этих данных вывести нельзя.
+function openModelInsights() {
+  if (!state.live || !baseline) return;
+  const result = state.result;
+  const roads = (result?.districts || baseline.districts).map(row => {
+    const indicator = row.indicators.T1;
+    return {name: row.name, before: indicator.before ?? indicator.value,
+      after: indicator.after ?? indicator.value, delta: indicator.delta};
+  }).sort((a, b) => a.after - b.after);
+  const losses = (result?.measures || []).flatMap(project => Object.entries(project.effects_realized)
+    .filter(([, value]) => value < 0)
+    .map(([key, value]) => ({project, key, value})));
+  const unresolved = result?.critical_indicators || baseline.critical_indicators || [];
+  const context = state.event ? events.find(event => event.id === state.event)?.name : "Обычные условия";
+  const body = `<p class="small">${esc(context)}. ${result ? "Показан рассчитанный план." : "Показано исходное состояние; сначала соберите план для сравнения."}</p>
+    <h4>Где дорогам нужна помощь</h4>
+    <p class="small muted">«Разгрузка дорог» — районный показатель: больше означает лучше. Это не наблюдаемые пробки и не прогноз конкретных улиц.</p>
+    ${dataTable(["Район", "До", "После", "Изменение"], roads.map(row => [row.name, fmt(row.before), result ? fmt(row.after) : "—", result ? signed(row.delta) : "—"]))}
+    <button class="btn wide" id="insights-show-roads">Показать разгрузку дорог на карте</button>
+    <h4>Цена компромиссов</h4>
+    ${losses.length ? losses.map(({project, key, value}) => `<p class="small"><b>${esc(project.name)}</b> · ${esc(project.district_name || "Весь город")}<br>${esc(catalog.indicators[key].name)}: <b class="negative">${signed(value)}</b> — прямой эффект меры с учётом лага. Итог включает остальные меры и синергии.</p>`).join("") : `<p class="small">${result ? "У выбранных проектов нет отрицательных прямых эффектов в модели. Это не означает отсутствия строительных неудобств в реальности." : "После расчёта здесь появятся отрицательные эффекты выбранных проектов."}</p>`}
+    <h4>Оставшиеся критические показатели</h4>
+    <p class="small">${unresolved.length ? "Показатели ниже критического порога перечислены в профилях районов и результате расчёта." : "Критических показателей в этом расчёте нет. Слабые места всё равно можно увидеть по тематическим слоям карты."}</p>
+    <h4>Проверить городской кризис</h4>
+    <p class="small">События меняют исходные условия. Можно проверить транспортные последствия закрытия моста, бурана или роста ДТП, затем пересобрать план.</p>
+    <button class="btn wide" id="insights-open-events">Выбрать событие</button>
+    <div class="advisor-notice">В модели нет уличного графа, потоков машин и расписания перекрытий. Она не определяет, на какой улице возникнет затор и сколько он продлится.</div>`;
+  showDrawer("insights", "Риски и компромиссы", "Последствия из расчёта движка", body);
+  $("insights-show-roads").onclick = () => {
+    state.mapMetric = "T1";
+    state.after = !!result;
+    closeDrawer();
+    render();
+  };
+  $("insights-open-events").onclick = openEvents;
+}
+document.addEventListener("DOMContentLoaded", () => {
+  $("model-insights-button").onclick = openModelInsights;
+});

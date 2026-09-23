@@ -23,6 +23,7 @@ import engine
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger(__name__)
 MAX_BODY = 128 * 1024
+CLIENT_DISCONNECTED = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -177,19 +178,27 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(15)
 
+    def handle(self):
+        try:
+            super().handle()
+        except CLIENT_DISCONNECTED:
+            # Обновление страницы может оборвать чтение запроса или flush ответа.
+            self.close_connection = True
+
     def send_bytes(self, status, data, content_type):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "same-origin")
-        self.end_headers()
-        if self.command != "HEAD":
-            try:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "same-origin")
+            self.end_headers()
+            if self.command != "HEAD":
                 self.wfile.write(data)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+        except CLIENT_DISCONNECTED:
+            # Заголовки тоже пишут в сокет. В закрытое соединение не отправляем 500.
+            self.close_connection = True
 
     def json_reply(self, status, value):
         self.send_bytes(status, json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"),
@@ -267,6 +276,9 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Тело запроса должно быть JSON-объектом.")
             self.json_reply(200, self.server.backend.post(path, body))
+        except CLIENT_DISCONNECTED:
+            # Клиент мог уйти со страницы до окончания чтения тела запроса.
+            self.close_connection = True
         except (ValueError, UnicodeDecodeError) as exc:
             self.error_reply(400, str(exc))
         except Exception:

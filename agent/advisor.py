@@ -10,8 +10,8 @@ from pathlib import Path
 import re
 import time
 
-from agent.evidence import EvidenceError, format_value, render_grounded_answer
-from agent.offline import offline_response
+from agent.evidence import EvidenceError, format_value, mentions_saray_shyk, qualitative_comment
+from agent.offline import offline_response, verified_report
 from agent.prompts import AUTO_QUESTION, SYSTEM_PROMPT
 from agent.tools import EngineTools, TOOL_SCHEMAS
 
@@ -105,12 +105,14 @@ def _current_plan_risks(question: str) -> bool:
 
 
 def _run_model(client, settings: dict, question: str, decisions: list, tools: EngineTools,
-               *, history=None, checked_plans=None, rule_notice="") -> str:
+               *, history=None, checked_plans=None, rule_notice="") -> tuple[str, bool]:
     previous = _checked(checked_plans, tools.event_id)
     same_cheaper = (previous and re.search(r"(?:этот|тот|такой)\s+же\s+(?:набор|план|состав)", question.lower())
                     and "дешев" in question.lower())
     current_risks = (question != AUTO_QUESTION and not rule_notice and not same_cheaper
                      and _current_plan_risks(question))
+    nura_priority = (not current_risks and not rule_notice and not same_cheaper
+                     and re.search(r"\bпочему\s+(?:район\s+)?нура\s+(?:так\s+)?важн", question.lower()))
     discussed = previous[-1]["decisions"] if same_cheaper else decisions
     # Недопустимые числа из просьбы не становятся фактами движка. Отказ уже
     # формирует приложение; модели остаётся объяснить найденный допустимый план.
@@ -124,6 +126,8 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
                     "selected_event_id": tools.event_id,
                     "analysis_scope": "current_plan_after_measures" if current_risks else None,
                     "rule_notice": rule_notice,
+                    "answer_format": "Качественный комментарий без чисел. Все факты, значения, районы и составы "
+                                     "приложение покажет отдельным проверенным отчётом из результата инструмента.",
                     "prepared_facts": [tools.model_payload(eid, brief=True) for eid in tools.evidence],
                 })}]
     deadline = time.monotonic() + TOTAL_TIMEOUT
@@ -141,6 +145,13 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
             choice = {"type": "function", "function": {"name": "optimize"}}
         elif step == 0 and (same_cheaper or current_risks):
             choice = {"type": "function", "function": {"name": "simulate"}}
+        elif step == 0 and nura_priority:
+            choice = {"type": "function", "function": {"name": "baseline"}}
+        if final and not repair_used:
+            messages.append({"role": "user", "content":
+                "Теперь дай только короткий качественный комментарий: последствия для жителей и компромисс. "
+                "Не повторяй числовые факты, Score, стоимость, бюджет, коды мер или ref. "
+                "Приложение само выведет точный отчёт по выбранному результату движка."})
         completion = client.chat.completions.create(
             model=settings["OPENAI_MODEL"], messages=messages, tools=TOOL_SCHEMAS,
             tool_choice=choice, parallel_tool_calls=False, max_tokens=550, temperature=0.2,
@@ -178,13 +189,19 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
                     # Не выполняем baseline вместо оценки оставшихся проблем.
                     executed_name = "simulate"
                     arguments = {"decisions": decisions}
+                elif nura_priority:
+                    # Вопрос о причине приоритета района относится к исходной
+                    # слабости и штрафу, даже если API проигнорировал forced tool.
+                    executed_name = "baseline"
+                    arguments = {}
                 response = tools.call(executed_name, arguments)
                 if requested != arguments or executed_name != call.function.name:
                     tools.trace[-1]["requested_arguments"] = requested
                     tools.trace[-1]["requested_name"] = call.function.name
                     tools.trace[-1]["note"] = (
                         "Оставшиеся риски проверяем после текущих мер, в выбранных условиях события."
-                        if current_risks else "Уточнение относится к последнему обсуждавшемуся набору."
+                        if current_risks else "Причину приоритета Нуры проверяем по исходному состоянию города."
+                        if nura_priority else "Уточнение относится к последнему обсуждавшемуся набору."
                         if same_cheaper else "Ищем свободную допустимую альтернативу без закрепления текущих мер.")
                 model_used_tool |= response["status"] != "error"
                 successful_tool |= response["status"] == "ok"
@@ -232,7 +249,8 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
         try:
             if not model_used_tool:
                 raise EvidenceError("Сначала вызови инструмент движка.")
-            return render_grounded_answer(message.content, tools.evidence)
+            modeled = any(mentions_saray_shyk(d.get("name", "")) for d in tools.data.districts.values())
+            return qualitative_comment(message.content, saray_shyk_modeled=modeled)
         except EvidenceError as exc:
             if repair_used:
                 raise
@@ -240,8 +258,8 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
             messages.append({"role": "assistant", "content": message.content or ""})
             messages.append({"role": "user", "content":
                 f"Исправь ответ один раз. Конкретная ошибка: {exc} "
-                "Копируй готовые ref из facts дословно. Не добавляй /result или /facts. "
-                "Убери самостоятельные числа; коды известных мер допустимы. Ответь кратко."})
+                "Не пересказывай цифры и не вставляй ref: их покажет готовый отчёт. "
+                "Напиши коротко обычными словами о последствиях и компромиссах без количеств."})
     raise EvidenceError("Модель не смогла завершить проверенный ответ.")
 
 
@@ -302,6 +320,17 @@ def ask_advisor(question: str, simulation_result: dict, history=None, checked_pl
     try:
         toolkit = EngineTools(event_id=event_id)
         notice = _rule_notice(question, toolkit.rules)
+        if mentions_saray_shyk(question) and not any(
+                mentions_saray_shyk(d.get("name", "")) for d in toolkit.data.districts.values()):
+            # Географическая граница нового района не создаёт показателей модели.
+            toolkit.call("baseline", {}, source="preparation")
+            return finish({"answer": "Для Сарайшыка в учебном датасете нет показателей и доли населения. "
+                "Граница района на карте не заменяет эти данные: его Score и эффекты проектов не рассчитываются. "
+                "Для отдельной оценки нужен согласованный набор исходных показателей.",
+                "tool_calls": toolkit.trace, "offline": True,
+                "notice": "Показано ограничение данных без обращения к ИИ.",
+                "reason": "Нельзя приписывать новому району показатели другого района.",
+                "reason_code": "unmodeled_district", "answer_mode": "verified_report"})
         calculated = toolkit.call("simulate", {"decisions": decisions}, source="preparation")
         if calculated["status"] != "ok":
             result = calculated["result"]
@@ -314,18 +343,15 @@ def ask_advisor(question: str, simulation_result: dict, history=None, checked_pl
         if not settings["OPENAI_MODEL"]:
             return fallback("Не указана OPENAI_MODEL. Укажите модель в .env для онлайн-ответов.", "missing_model")
         client = _create_client(settings)
-        answer = _run_model(client, settings, question, decisions, toolkit,
-                            history=history, checked_plans=checked_plans, rule_notice=notice)
-        if question == AUTO_QUESTION:
-            answer = (f"**Итог.** Score — {format_value(result['score'])}; "
-                      f"база — {format_value(result['baseline']['score'])}; "
-                      f"изменение — {format_value(result['delta']['score'])}.\n\n" + answer)
-        if notice:
-            answer = notice + "\n\n" + answer
-        if result.get("event"):
-            answer = f"Условия сценария: «{result['event']['name']}».\n\n" + answer
+        comment, omitted = _run_model(client, settings, question, decisions, toolkit,
+                                     history=history, checked_plans=checked_plans, rule_notice=notice)
+        report = verified_report(result, trace=toolkit.trace, evidence=toolkit.evidence,
+                                 rule_notice=notice, auto=question == AUTO_QUESTION, current_decisions=decisions)
+        answer = report + "\n\n**Комментарий ИИ.** " + comment
         return finish({"answer": answer, "tool_calls": toolkit.trace, "offline": False,
-                       "notice": "", "reason": "", "reason_code": ""})
+                       "notice": "", "reason": "", "reason_code": "",
+                       "answer_mode": "verified_report_with_ai_comment", "ai_comment": comment,
+                       "numeric_claims_replaced": omitted})
     except Exception as exc:
         LOGGER.warning("Советник использует результат движка (%s)", type(exc).__name__)
         code, reason = _failure_reason(exc)

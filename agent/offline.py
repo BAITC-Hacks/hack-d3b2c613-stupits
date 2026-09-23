@@ -48,6 +48,9 @@ def offline_analysis(result: dict) -> str:
         risks.append(f"Остаток бюджета — {value(remaining)} у.е.; он не добавляет баллов")
     if result.get("N_crit") is not None:
         risks.append(f"Критических показателей осталось: {value(result['N_crit'])}")
+    for item in result.get("critical_indicators", []):
+        risks.append(f"{item['district_name']}: «{item['indicator_name']}» остаётся в критической зоне "
+                     f"({value(item['value'])})")
     parts.append("**Риски и компромиссы.** " + "; ".join(risks) + ".")
 
     improved = {key for district in result.get("districts", [])
@@ -148,7 +151,7 @@ def _search_analysis(search: dict, current: dict, current_decisions: list, *, au
     if constraints.get("exclude"):
         limits.append("исключены меры " + ", ".join(map(str, constraints["exclude"])))
     if limits:
-        parts.append("Условия поиска: " + "; ".join(limits) + ".")
+        parts.append("Условия поиска: " + "; ".join(limits).rstrip(".") + ".")
     return "\n\n".join(parts)
 
 
@@ -242,7 +245,11 @@ def _contextual_analysis(result: dict, trace: list, evidence: dict, *, auto: boo
             labels = _decision_labels(_decisions(raw) or call.get("arguments", {}).get("decisions", []))
             description = "**Рассчитанный набор.** " + "; ".join(labels) + ".\n\n" if labels else ""
             return description + offline_analysis(raw)
-        # Успешная validate не стирает предшествующий расчёт/результат optimize.
+        if name == "validate" and raw.get("valid"):
+            labels = _decision_labels(call.get("arguments", {}).get("decisions", []))
+            return ("**Проверка предложенного набора.** Правила соблюдены. "
+                    "Валидация не рассчитывает его Score; для оценки нужен simulate.\n\n"
+                    + "; ".join(labels))
 
     if not auto:
         for call, raw in reversed(calls):
@@ -251,14 +258,13 @@ def _contextual_analysis(result: dict, trace: list, evidence: dict, *, auto: boo
     return offline_analysis(result)
 
 
-def offline_response(result: dict, *, trace: list | None = None, reason: str = "",
-                     evidence: dict[str, dict] | None = None, question: str = "",
-                     rule_notice: str = "", auto: bool = False,
-                     current_decisions: list | None = None) -> dict:
-    """Запасной ответ сохраняет результат последнего запроса, даже если LLM подвела.
+def verified_report(result: dict, *, trace: list | None = None,
+                    evidence: dict[str, dict] | None = None, rule_notice: str = "",
+                    auto: bool = False, current_decisions: list | None = None) -> str:
+    """Факты, подписи и контекст выдаёт приложение из того же ответа движка.
 
-    Старые вызовы с result/trace/reason поддерживаются. Причину отказа готовит
-    advisor: здесь не включаем исключения API, настройки или исходный вопрос.
+    Этот отчёт одинаков для онлайн- и офлайн-режима. Модель не может подставить
+    score вместо стоимости, район вместо города или baseline вместо результата.
     """
     try:
         answer = _contextual_analysis(result, trace or [], evidence or {}, auto=auto,
@@ -274,5 +280,15 @@ def offline_response(result: dict, *, trace: list | None = None, reason: str = "
     event = result.get("event") if isinstance(result, dict) else None
     if isinstance(event, dict) and event.get("name"):
         answer = f"Условия сценария: «{event['name']}».\n\n" + answer
+    return answer
+
+
+def offline_response(result: dict, *, trace: list | None = None, reason: str = "",
+                     evidence: dict[str, dict] | None = None, question: str = "",
+                     rule_notice: str = "", auto: bool = False,
+                     current_decisions: list | None = None) -> dict:
+    """Запасной ответ сохраняет результат последнего запроса, даже если LLM подвела."""
+    answer = verified_report(result, trace=trace, evidence=evidence, rule_notice=rule_notice,
+                             auto=auto, current_decisions=current_decisions)
     return {"answer": answer, "tool_calls": trace or [], "offline": True,
             "notice": "Советник работает в офлайн-режиме.", "reason": reason}

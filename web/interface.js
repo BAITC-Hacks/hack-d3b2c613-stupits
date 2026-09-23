@@ -120,19 +120,40 @@ function cleanDecisions(value) {
   if (!Array.isArray(value) || value.length > 30)
     throw new Error("Нужен список решений допустимого размера.");
   return value.map((item) => {
-    if (!item || typeof item.measure !== "string" || item.measure.length > 40 ||
-        (item.district !== null && typeof item.district !== "string") ||
-        (typeof item.district === "string" && item.district.length > 80))
-      throw new Error("Решение должно содержать measure и district (код района или null).");
+    if (
+      !item ||
+      typeof item.measure !== "string" ||
+      item.measure.length > 40 ||
+      (item.district !== null && typeof item.district !== "string") ||
+      (typeof item.district === "string" && item.district.length > 80)
+    )
+      throw new Error(
+        "Решение должно содержать measure и district (код района или null).",
+      );
     return { measure: item.measure, district: item.district };
   });
 }
 function cleanSavedPlan(value) {
-  if (!value || typeof value.name !== "string" || !value.name.trim() || value.name.length > 120)
+  if (
+    !value ||
+    typeof value.name !== "string" ||
+    !value.name.trim() ||
+    value.name.length > 120
+  )
     throw new Error("У каждого плана должно быть название до 120 символов.");
-  if (value.event_id != null && (typeof value.event_id !== "string" || value.event_id.length > 40))
+  if (
+    value.event_id != null &&
+    (typeof value.event_id !== "string" || value.event_id.length > 40)
+  )
     throw new Error("Некорректный код события в сохранённом плане.");
-  return { name: value.name.trim(), decisions: cleanDecisions(value.decisions), event_id: value.event_id || null };
+  return {
+    name: value.name.trim(),
+    decisions: cleanDecisions(value.decisions),
+    event_id:
+      typeof value.event_id === "string"
+        ? value.event_id.trim().toUpperCase() || null
+        : null,
+  };
 }
 function readSession() {
   try {
@@ -142,11 +163,20 @@ function readSession() {
     if (value.schema !== SESSION_SCHEMA) return null;
     value.plan = cleanDecisions(value.plan);
     value.savedPlans = (Array.isArray(value.savedPlans) ? value.savedPlans : [])
-      .slice(0, MAX_SAVED_PLANS).map(cleanSavedPlan);
-    if (value.event != null && (typeof value.event !== "string" || value.event.length > 40)) return null;
-    value.messages = (Array.isArray(value.messages) ? value.messages : []).filter(
-      (item) => ["user", "assistant"].includes(item?.role) && typeof item.content === "string",
-    ).slice(-60);
+      .slice(0, MAX_SAVED_PLANS)
+      .map(cleanSavedPlan);
+    if (
+      value.event != null &&
+      (typeof value.event !== "string" || value.event.length > 40)
+    )
+      return null;
+    value.messages = (Array.isArray(value.messages) ? value.messages : [])
+      .filter(
+        (item) =>
+          ["user", "assistant"].includes(item?.role) &&
+          typeof item.content === "string",
+      )
+      .slice(-60);
     return value;
   } catch {
     // Повреждённое или запрещённое браузером хранилище не мешает запуску.
@@ -156,34 +186,58 @@ function readSession() {
 function persistSession() {
   if (state.restoring || state.bootstrapBusy || !catalog || !state.live) return;
   try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-      schema: SESSION_SCHEMA, plan: state.plan, event: state.event,
-      district: state.district, targets: state.targets, tab: state.tab,
-      after: state.after, mapMetric: state.mapMetric || "D",
-      savedPlans: state.savedPlans, messages: state.messages.slice(-60),
-      advisor: state.advisor, advisorError: state.advisorError,
-      checked_plans: conversationContext().checked_plans,
-      resultKey: state.resultKey,
-      resultFingerprint: state.result ? fingerprint(state.result) : null,
-      modelFingerprint: modelFingerprint(),
-    }));
+    sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({
+        schema: SESSION_SCHEMA,
+        plan: state.plan,
+        event: state.event,
+        district: state.district,
+        targets: state.targets,
+        tab: state.tab,
+        after: state.after,
+        mapMetric: state.mapMetric || "D",
+        savedPlans: state.savedPlans,
+        messages: state.messages.slice(-60),
+        advisor: state.advisor,
+        advisorError: state.advisorError,
+        checked_plans: conversationContext().checked_plans,
+        resultKey: state.resultKey,
+        resultFingerprint: state.result ? fingerprint(state.result) : null,
+        modelFingerprint: modelFingerprint(),
+      }),
+    );
   } catch {
     // Например, приватный режим или переполненная квота. Расчёт остаётся доступен.
     if (!state.storageNoticeShown) {
       state.storageNoticeShown = true;
-      toast("Браузер не сохранил сессию. Экспортируйте планы в JSON перед обновлением страницы.");
+      toast(
+        "Браузер не сохранил сессию. Экспортируйте планы в JSON перед обновлением страницы.",
+      );
     }
   }
 }
 function restoreAnalysis(saved, result) {
-  if (!saved || saved.resultKey !== currentKey() ||
-      saved.modelFingerprint !== modelFingerprint() ||
-      saved.resultFingerprint !== fingerprint(result)) return false;
-  state.advisor = saved.advisor && typeof saved.advisor.answer === "string" ? saved.advisor : null;
-  state.advisorError = typeof saved.advisorError === "string" ? saved.advisorError : null;
+  if (
+    !saved ||
+    saved.resultKey !== currentKey() ||
+    saved.modelFingerprint !== modelFingerprint() ||
+    saved.resultFingerprint !== fingerprint(result)
+  )
+    return false;
+  state.advisor =
+    saved.advisor && typeof saved.advisor.answer === "string"
+      ? saved.advisor
+      : null;
+  state.advisorError =
+    typeof saved.advisorError === "string" ? saved.advisorError : null;
   state.messages = saved.messages || [];
-  state.checkedPlans = Array.isArray(saved.checked_plans) ? saved.checked_plans.slice(-6) : [];
-  state.tab = ["overview", "projects", "results"].includes(saved.tab) ? saved.tab : "results";
+  state.checkedPlans = Array.isArray(saved.checked_plans)
+    ? saved.checked_plans.slice(-6)
+    : [];
+  state.tab = ["overview", "projects", "results"].includes(saved.tab)
+    ? saved.tab
+    : "results";
   state.after = saved.after !== false;
   return !!state.advisor || !!state.advisorError;
 }
@@ -244,6 +298,7 @@ function invalidateResult() {
     "advisor",
     "chat",
     "compare",
+    "teams-compare",
     "robustness",
   ])
     requests.get(name)?.abort();
@@ -259,7 +314,11 @@ function invalidateResult() {
   state.errors = [];
   state.busy = false;
   $("advisor-card").classList.add("hidden");
-  if (["advisor", "compare", "robustness"].includes(state.drawer))
+  if (
+    ["advisor", "compare", "teams-compare", "robustness", "report"].includes(
+      state.drawer,
+    )
+  )
     closeDrawer();
 }
 function quickErrors(project, target) {
@@ -454,10 +513,12 @@ function renderHeader() {
   $("clear-plan").disabled = locked() || !state.plan.length;
   $("events-button").disabled = state.bootstrapBusy;
   $("tour-button").disabled = locked();
-  if ($("saved-plans-button")) $("saved-plans-button").disabled = !state.live || state.bootstrapBusy;
-  if ($("print-report-button")) $("print-report-button").disabled = !state.result || locked();
+  if ($("saved-plans-button"))
+    $("saved-plans-button").disabled = !state.live || state.bootstrapBusy;
+  if ($("print-report-button"))
+    $("print-report-button").disabled = !state.result || locked();
   $("city-summary").textContent =
-    `${catalog.districts.length} районов · ${catalog.measures.length} проектов · одно будущее`;
+    `${geojson?.features?.length || catalog.districts.length} районов на карте · ${catalog.districts.length} в модели · ${catalog.measures.length} проектов`;
   document.querySelector(".tab-count").textContent = catalog.measures.length;
 }
 function renderPanel() {
@@ -475,8 +536,18 @@ function districtCards() {
     <span class="district-value">${fmt(districtScore(viewDistrict(row.id)))}</span>${icon("arrow")}</button>`,
     )
     .join("");
-  const extra = (geojson?.features || []).filter((feature) => !district(feature.properties?.id));
-  return modeled + extra.map((feature) => `<button class="district-row" data-district="${esc(feature.properties.id)}"><i class="district-dot" style="background:#9aa6aa"></i><span class="district-title">${esc(feature.properties.name || feature.properties.id)}<br><small class="muted">Нет показателей в модели</small></span><span class="district-value">—</span>${icon("arrow")}</button>`).join("");
+  const extra = (geojson?.features || []).filter(
+    (feature) => !district(feature.properties?.id),
+  );
+  return (
+    modeled +
+    extra
+      .map(
+        (feature) =>
+          `<button class="district-row" data-district="${esc(feature.properties.id)}"><i class="district-dot" style="background:#9aa6aa"></i><span class="district-title">${esc(feature.properties.name || feature.properties.id)}<br><small class="muted">Нет показателей в модели</small></span><span class="district-value">—</span>${icon("arrow")}</button>`,
+      )
+      .join("")
+  );
 }
 function bindDistricts(root) {
   root.querySelectorAll("[data-district]").forEach((button) => {
@@ -506,12 +577,36 @@ function indicatorHtml([key, row]) {
     <div class="track"><i style="width:${Math.max(0, Math.min(100, value))}%;background:${severity[2]}"></i></div>
     <div class="indicator-status"><span class="${severity[1]}">${severity[0]}</span>${state.after && row.delta !== undefined ? `<span class="${row.delta < 0 ? "negative" : "positive"}">${signed(row.delta)} к исходному</span>` : ""}</div></div>`;
 }
+function geographicSource(feature) {
+  if (feature?.properties?.source !== "osm") return "";
+  let link = "";
+  try {
+    const url = new URL(feature.properties.source_url);
+    if (
+      url.protocol === "https:" &&
+      ["www.openstreetmap.org", "openstreetmap.org"].includes(url.hostname) &&
+      !url.username &&
+      !url.password
+    )
+      link = `<a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">Открыть границу в OpenStreetMap</a>`;
+  } catch {
+    /* Отсутствующий или некорректный URL не превращаем в ссылку. */
+  }
+  return `<p class="small muted">Границы OpenStreetMap — общественный картографический источник, не официальное юридическое описание. ${link}</p>`;
+}
 function renderDistrict() {
   const row = district(state.district);
   if (!row) {
-    const feature = geojson?.features?.find((item) => item.properties?.id === state.district);
-    $("panel").innerHTML = `<button class="back" id="back-city">${icon("back")} Все районы</button><span class="eyebrow">Географический район</span><h2>${esc(feature?.properties?.name || state.district)}</h2><div class="advisor-notice">В учебном датасете этого района нет. Его границы показаны для географического контекста; оценка D, показатели и размещение проектов здесь недоступны.</div><p>Городской Score рассчитывается по районам, для которых движок содержит данные.</p>`;
-    $("back-city").onclick = () => { state.district = null; render(); flyOverview(); };
+    const feature = geojson?.features?.find(
+      (item) => item.properties?.id === state.district,
+    );
+    $("panel").innerHTML =
+      `<button class="back" id="back-city">${icon("back")} Все районы</button><span class="eyebrow">Географический район</span><h2>${esc(feature?.properties?.name || state.district)}</h2><div class="advisor-notice">В учебном датасете этого района нет. Его границы показаны для географического контекста; оценка D, показатели и размещение проектов здесь недоступны.</div><p>Городской Score рассчитывается по районам, для которых движок содержит данные.</p>${geographicSource(feature)}`;
+    $("back-city").onclick = () => {
+      state.district = null;
+      render();
+      flyOverview();
+    };
     return;
   }
   const shown = viewDistrict(row.id);
@@ -560,7 +655,7 @@ function renderProjects() {
           )}<br>Лаг: ${project.lag} кв. · эффекты до учёта задержки</div>
         <div class="project-bottom">${project.scope === "city" ? '<span class="city-scope">Во всех районах</span>' : `<select aria-label="Район реализации ${esc(project.name)}" data-target="${esc(project.id)}" ${chosen || locked() ? "disabled" : ""}>${catalog.districts.map((row) => `<option value="${esc(row.id)}" ${row.id === target ? "selected" : ""}>${esc(row.name)}</option>`).join("")}</select>`}
         <button class="add-project" data-${chosen ? "remove" : "add"}="${esc(project.id)}" ${locked() || (!chosen && reason) ? "disabled" : ""} title="${esc(chosen ? "Убрать из плана" : reason || "Добавить проект")}">${chosen ? "✓ В плане" : "＋ Добавить"}</button></div>
-        ${chosen ? '<div class="reason">Для смены района уберите проект и добавьте заново.</div>' : reason ? `<div class="reason">${esc(reason)}</div>` : ""}</article>`;
+        ${chosen ? `<div class="reason">${project.scope === "city" ? "Мера действует во всех районах расчётной модели." : "Для смены района уберите проект и добавьте заново."}</div>` : reason ? `<div class="reason">${esc(reason)}</div>` : ""}</article>`;
       })
       .join(
         "",
@@ -608,8 +703,8 @@ function renderPlan() {
       const choice = state.plan[index],
         project = choice && measure(choice.measure);
       return choice
-        ? `<div class="plan-slot filled"><span class="slot-number">${index + 1}</span><div class="slot-copy" title="${esc(project.name)}"><b>${esc(project.name)}</b>
-      <span>${esc(choice.district ? district(choice.district)?.name : "Весь город")} · ${fmt(project.cost, 0)} у.е.</span></div><button class="slot-remove" data-remove="${esc(choice.measure)}" ${locked() ? "disabled" : ""} aria-label="Убрать ${esc(project.name)}">×</button></div>`
+        ? `<div class="plan-slot filled"><span class="slot-number">${index + 1}</span><div class="slot-copy" title="${esc(project?.name || choice.measure)}"><b>${esc(project?.name || choice.measure)}</b>
+      <span>${esc(choice.district ? district(choice.district)?.name || choice.district : "Весь город")} · ${fmt(project?.cost, 0)} у.е.</span></div><button class="slot-remove" data-remove="${esc(choice.measure)}" ${locked() ? "disabled" : ""} aria-label="Убрать ${esc(project?.name || choice.measure)}">×</button></div>`
         : `<button class="plan-slot empty" data-empty><span class="slot-number">${index + 1}</span>Выбрать проект</button>`;
     },
   ).join("");
@@ -803,6 +898,7 @@ async function applyExample() {
 function showDrawer(type, title, subtitle, body) {
   state.drawer = type;
   $("drawer").classList.remove("hidden");
+  $("drawer").classList.toggle("report-view", type === "report");
   $("drawer").innerHTML =
     `<div class="drawer-header"><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><button class="icon-btn" id="close-drawer" aria-label="Закрыть панель">${icon("close")}</button></div><div class="drawer-body" id="drawer-body">${body}</div>`;
   $("close-drawer").onclick = closeDrawer;
@@ -810,6 +906,8 @@ function showDrawer(type, title, subtitle, body) {
 function closeDrawer() {
   state.drawer = null;
   $("drawer").classList.add("hidden");
+  $("drawer").classList.remove("report-view");
+  document.body.classList.remove("printing-report");
 }
 function markdown(text) {
   // HTML от сервера/модели не исполняется; поддерживаем безопасное простое оформление.
@@ -855,6 +953,7 @@ async function loadAdvisor(version, key) {
       persistSession();
       renderAdvisorCard();
       if (state.drawer === "advisor") renderAdvisorDrawer();
+      if (state.drawer === "report") printReport();
     }
   }
 }
@@ -971,7 +1070,9 @@ async function askQuestion(question) {
 
 async function optimize(robust = false) {
   if (!state.live || state.bootstrapBusy || state.optBusy) return;
-  const event = state.event;
+  const event = state.event,
+    revision = (state.optimizeRevision || 0) + 1;
+  state.optimizeRevision = revision;
   state.optBusy = true;
   showDrawer(
     "optimize",
@@ -982,24 +1083,35 @@ async function optimize(robust = false) {
     '<div class="empty-state"><span class="spinner"></span>Ищем допустимые планы…</div>',
   );
   try {
-    const response = await request(
-      "/api/optimize",
-      { top_n: 5, event_id: robust ? null : event, constraints: {}, robust },
-      "optimize",
-      120000,
-    );
-    if (event !== state.event) return;
+    const [response, searchBaseline] = await Promise.all([
+      request(
+        "/api/optimize",
+        { top_n: 5, event_id: robust ? null : event, constraints: {}, robust },
+        "optimize",
+        120000,
+      ),
+      robust && event
+        ? request("/api/baseline", undefined, "optimize-baseline")
+        : Promise.resolve(baseline),
+    ]);
+    if (event !== state.event || revision !== state.optimizeRevision) return;
     if (response.errors?.length) throw new Error(response.errors.join(" "));
     state.optResults = response.results || [];
     state.optEvent = event;
     state.optRobust = robust;
+    state.optBaseline = searchBaseline.score;
     if (state.drawer === "optimize") renderOptimization();
   } catch (error) {
-    if (event === state.event && state.drawer === "optimize")
+    if (
+      event === state.event &&
+      revision === state.optimizeRevision &&
+      state.drawer === "optimize"
+    )
       $("drawer-body").innerHTML =
         `<div class="error-box">${esc(errorText(error))}</div>`;
   } finally {
-    if (event === state.event) state.optBusy = false;
+    if (event === state.event && revision === state.optimizeRevision)
+      state.optBusy = false;
   }
 }
 function renderOptimization() {
@@ -1007,16 +1119,19 @@ function renderOptimization() {
     "optimize",
     "Лучшие решения для города",
     state.optRobust
-      ? "Порядок по устойчивости в худшем случае"
+      ? "Оценки без события; порядок по устойчивости в худшем случае"
       : "Применение заменит текущий план",
-    (state.optResults.length
-      ? state.optResults
-          .map(
-            (plan, index) =>
-              `<article class="opt-card"><div class="row between"><span class="pill">План ${index + 1}</span><span>${fmt(plan.cost, 0)} у.е.</span></div><div class="row"><strong class="opt-score">${fmt(plan.score)}</strong><span class="positive small">${signed(plan.score_delta)} к базе</span></div>${plan.worst_case ? `<p class="small">Худший случай: ${esc(plan.worst_case.name)} · Score ${fmt(plan.worst_case.score)}</p>` : ""}<ul>${plan.decisions.map((item) => `<li>${esc(measure(item.measure)?.name || item.measure)} · ${esc(item.district ? district(item.district)?.name : "Весь город")}</li>`).join("")}</ul><button class="btn ${index === 0 ? "primary" : ""} wide" data-apply-opt="${index}" ${locked() ? "disabled" : ""}>Применить ${icon("arrow")}</button></article>`,
-          )
-          .join("")
-      : "<p>Допустимые планы не найдены.</p>") +
+    (state.optRobust
+      ? `<div class="advisor-notice">Score и прирост в карточках рассчитаны без события. База: ${fmt(state.optBaseline)}. Худший случай проверяется отдельно.${state.event ? ` При применении движок пересчитает план в текущих условиях: «${esc(events.find((item) => item.id === state.event)?.name || state.event)}».` : ""}</div>`
+      : "") +
+      (state.optResults.length
+        ? state.optResults
+            .map(
+              (plan, index) =>
+                `<article class="opt-card"><div class="row between"><span class="pill">План ${index + 1}</span><span>${fmt(plan.cost, 0)} у.е.</span></div><p class="small">${state.optRobust ? "Score без события" : "Score в выбранных условиях"} · база ${fmt(state.optBaseline)}</p><div class="row"><strong class="opt-score">${fmt(plan.score)}</strong><span class="positive small">${signed(plan.score_delta)} к этой базе</span></div>${plan.worst_case ? `<p class="small">Худший случай: ${esc(plan.worst_case.name)} · Score ${fmt(plan.worst_case.score)}</p>` : ""}<ul>${plan.decisions.map((item) => `<li>${esc(measure(item.measure)?.name || item.measure)} · ${esc(item.district ? district(item.district)?.name : "Весь город")}</li>`).join("")}</ul><button class="btn ${index === 0 ? "primary" : ""} wide" data-apply-opt="${index}" ${locked() ? "disabled" : ""}>Применить ${icon("arrow")}</button></article>`,
+            )
+            .join("")
+        : "<p>Допустимые планы не найдены.</p>") +
       `<button class="btn wide" id="search-robust">${state.optRobust ? "Обычный поиск" : "Искать устойчивые планы"}</button>`,
   );
   $("search-robust").onclick = () => optimize(!state.optRobust);
@@ -1130,6 +1245,418 @@ async function compareWithBest() {
   }
 }
 
+function eventName(id) {
+  return id
+    ? events.find((item) => item.id === id)?.name || id
+    : "Обычные условия, без события";
+}
+function planDescription(plan) {
+  return plan.decisions.map(
+    (item) =>
+      `${measure(item.measure)?.name || item.measure} · ${item.district ? district(item.district)?.name || item.district : "Весь город"}`,
+  );
+}
+function openSavedPlans() {
+  if (!state.live) return toast("Сначала подключитесь к движку.");
+  const disabled = state.libraryBusy || locked();
+  showDrawer(
+    "saved-plans",
+    "Планы команд",
+    "Составы сохраняются в этой вкладке; JSON позволяет передать их другой команде.",
+    `<p class="small">Все планы сравниваются в одинаковых текущих условиях: <b>${esc(eventName(state.event))}</b>. Оценки каждый раз рассчитывает движок.</p>
+    ${state.libraryError ? `<div class="error-box" role="alert">${esc(state.libraryError)}</div>` : ""}
+    <form id="save-plan-form"><label for="saved-plan-name">Название команды или плана</label><input id="saved-plan-name" class="plan-name-input" maxlength="120" placeholder="Например, команда «Нура»" ${disabled ? "disabled" : ""}><button class="btn primary wide" ${disabled || !state.result ? "disabled" : ""}>Сохранить текущий рассчитанный план</button></form>
+    <p class="small muted">Для нового плана сначала выберите проекты и получите результат. Сохранено ${state.savedPlans.length} из ${MAX_SAVED_PLANS}.</p>
+    ${state.libraryBusy ? '<p role="status"><span class="spinner"></span> Проверяем составы движком…</p>' : ""}
+    ${
+      state.savedPlans
+        .map(
+          (plan, index) =>
+            `<article class="opt-card"><h4>${esc(plan.name)}</h4><p class="small">Условия сохранения: ${esc(eventName(plan.event_id))}</p><ul>${planDescription(
+              plan,
+            )
+              .map((text) => `<li>${esc(text)}</li>`)
+              .join(
+                "",
+              )}</ul><div class="row"><button class="btn primary" data-apply-saved="${index}" ${disabled ? "disabled" : ""}>Открыть и пересчитать</button><button class="btn" data-delete-saved="${index}" ${disabled ? "disabled" : ""}>Удалить</button></div></article>`,
+        )
+        .join("") || "<p>Сохранённых планов пока нет.</p>"
+    }
+    <button id="compare-saved-plans" class="btn lime wide" ${disabled || state.savedPlans.length < 2 ? "disabled" : ""}>Сравнить команды в текущих условиях</button>
+    <button id="export-saved-plans" class="btn wide" ${disabled || !state.savedPlans.length ? "disabled" : ""}>Экспортировать планы в JSON</button>
+    <label class="small" for="import-plans-file">Импортировать планы из JSON</label><input id="import-plans-file" type="file" accept="application/json,.json" ${disabled ? "disabled" : ""}>
+    <p class="small muted">Импорт проверяет каждый план и заново считает результат на сервере. Числа и ответы советника из файла не принимаются.</p>`,
+  );
+  $("save-plan-form").onsubmit = (event) => {
+    event.preventDefault();
+    void saveCurrentPlan($("saved-plan-name").value);
+  };
+  $("compare-saved-plans").onclick = compareSavedPlans;
+  $("export-saved-plans").onclick = exportSavedPlans;
+  $("import-plans-file").onchange = (event) => {
+    const file = event.target.files?.[0];
+    if (file) void importSavedPlans(file);
+  };
+  $("drawer")
+    .querySelectorAll("[data-apply-saved]")
+    .forEach((button) => {
+      button.onclick = () => applySavedPlan(Number(button.dataset.applySaved));
+    });
+  $("drawer")
+    .querySelectorAll("[data-delete-saved]")
+    .forEach((button) => {
+      button.onclick = () => {
+        if (state.libraryBusy || locked()) return;
+        state.savedPlans.splice(Number(button.dataset.deleteSaved), 1);
+        state.libraryRevision++;
+        state.libraryError = null;
+        persistSession();
+        openSavedPlans();
+      };
+    });
+}
+async function checkNamedPlan(plan, channel) {
+  const body = { decisions: plan.decisions, event_id: plan.event_id };
+  const validation = await request(
+    "/api/validate",
+    body,
+    `${channel}-validate`,
+  );
+  if (!validation.valid)
+    throw new Error(`«${plan.name}»: ${(validation.errors || []).join(" ")}`);
+  const result = await request("/api/simulate", body, `${channel}-simulate`);
+  if (!result.valid)
+    throw new Error(`«${plan.name}»: ${(result.errors || []).join(" ")}`);
+  // Сервер принимает псевдонимы; в сохранённом составе оставляем канонические id.
+  plan.decisions = result.measures.map((item) => ({
+    measure: item.measure,
+    district: item.district,
+  }));
+  plan.event_id = result.event?.id || null;
+  return result;
+}
+function mergeSavedPlans(plans) {
+  const next = clone(state.savedPlans);
+  for (const plan of plans) {
+    const existing = next.find((item) => item.name === plan.name);
+    if (existing) {
+      if (
+        planKey(existing.decisions) !== planKey(plan.decisions) ||
+        existing.event_id !== plan.event_id
+      )
+        throw new Error(
+          `Название «${plan.name}» уже занято другим планом. Выберите другое название.`,
+        );
+    } else next.push(plan);
+  }
+  if (next.length > MAX_SAVED_PLANS)
+    throw new Error(
+      `Можно сохранить не более ${MAX_SAVED_PLANS} планов. Удалите лишние перед импортом.`,
+    );
+  return next;
+}
+async function saveCurrentPlan(name) {
+  if (!state.result || state.libraryBusy || locked()) return;
+  const version = state.version,
+    key = currentKey();
+  state.libraryBusy = true;
+  state.libraryError = null;
+  try {
+    const plan = cleanSavedPlan({
+      name,
+      decisions: state.plan,
+      event_id: state.event,
+    });
+    const next = mergeSavedPlans([plan]);
+    openSavedPlans();
+    await checkNamedPlan(plan, "save-plan");
+    if (version !== state.version || key !== currentKey()) return;
+    state.savedPlans = next;
+    toast("План команды проверен и сохранён.");
+  } catch (error) {
+    if (version === state.version) state.libraryError = errorText(error);
+  } finally {
+    state.libraryBusy = false;
+    persistSession();
+    if (state.drawer === "saved-plans") openSavedPlans();
+  }
+}
+function exportSavedPlans() {
+  if (!state.savedPlans.length) return;
+  const file = new Blob(
+    [
+      JSON.stringify(
+        {
+          format: "akim-team-plans",
+          schema: SESSION_SCHEMA,
+          plans: state.savedPlans.map(cleanSavedPlan),
+        },
+        null,
+        2,
+      ),
+    ],
+    { type: "application/json;charset=utf-8" },
+  );
+  const url = URL.createObjectURL(file),
+    link = document.createElement("a");
+  link.href = url;
+  link.download = "akim-plans.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function importSavedPlans(file) {
+  if (state.libraryBusy || locked()) return;
+  const version = state.version,
+    revision = ++state.libraryRevision;
+  state.libraryBusy = true;
+  state.libraryError = null;
+  openSavedPlans();
+  try {
+    if (file.size > 1024 * 1024)
+      throw new Error("Файл планов слишком большой; допустим JSON до 1 МБ.");
+    const data = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
+    if (
+      data.format !== "akim-team-plans" ||
+      data.schema !== SESSION_SCHEMA ||
+      !Array.isArray(data.plans) ||
+      !data.plans.length ||
+      data.plans.length > MAX_SAVED_PLANS
+    )
+      throw new Error(
+        "Ожидается JSON, экспортированный из списка планов команд (формат akim-team-plans, версия 1).",
+      );
+    const plans = data.plans.map(cleanSavedPlan),
+      next = mergeSavedPlans(plans);
+    for (const plan of plans) {
+      if (version !== state.version || revision !== state.libraryRevision)
+        return;
+      await checkNamedPlan(plan, "import-plan");
+    }
+    if (version !== state.version || revision !== state.libraryRevision) return;
+    state.savedPlans = next;
+    toast("Импорт завершён: все составы проверены и пересчитаны движком.");
+  } catch (error) {
+    if (version === state.version)
+      state.libraryError =
+        error instanceof SyntaxError
+          ? "Не удалось прочитать JSON. Проверьте файл."
+          : errorText(error);
+  } finally {
+    state.libraryBusy = false;
+    persistSession();
+    if (state.drawer === "saved-plans") openSavedPlans();
+  }
+}
+async function applySavedPlan(index) {
+  if (state.libraryBusy || locked()) return;
+  const saved = state.savedPlans[index];
+  if (!saved) return;
+  const version = state.version,
+    plan = clone(saved);
+  state.libraryBusy = true;
+  state.libraryError = null;
+  openSavedPlans();
+  try {
+    await checkNamedPlan(plan, "apply-saved");
+    if (version !== state.version) return;
+    state.libraryBusy = false;
+    if (plan.event_id !== state.event)
+      await bootstrap(plan.event_id, { plan: plan.decisions });
+    else if (await commitPlan(plan.decisions)) {
+      closeDrawer();
+      await calculate();
+    }
+  } catch (error) {
+    if (version === state.version) state.libraryError = errorText(error);
+  } finally {
+    state.libraryBusy = false;
+    persistSession();
+    if (state.drawer === "saved-plans") openSavedPlans();
+  }
+}
+function comparisonHtml(response) {
+  return (
+    `<p class="small">Условия: ${esc(eventName(state.event))}. База: ${fmt(response.baseline_score)}. Лидер: ${esc(response.leader || "нет допустимых планов")}.</p>` +
+    dataTable(
+      [
+        "Команда / план",
+        "Место",
+        "Score",
+        "Δ к базе",
+        "Стоимость",
+        "Отставание",
+      ],
+      response.ranking.map((row) => [
+        row.name,
+        row.rank ?? "—",
+        fmt(row.score),
+        signed(row.delta_vs_baseline),
+        fmt(row.cost, 0),
+        fmt(row.gap_to_leader),
+      ]),
+    ) +
+    response.ranking
+      .map(
+        (row) =>
+          `<article class="opt-card"><h4>${esc(row.name)}</h4><p>${row.valid ? "Допустимый план" : esc((row.errors || []).join(" "))}</p><ul>${(row.measures || []).map((text) => `<li>${esc(text)}</li>`).join("")}</ul></article>`,
+      )
+      .join("")
+  );
+}
+async function compareSavedPlans() {
+  if (state.savedPlans.length < 2 || state.libraryBusy || locked()) return;
+  const version = state.version,
+    event = state.event;
+  showDrawer(
+    "teams-compare",
+    "Сравнение команд",
+    "Все составы пересчитаны в одинаковых выбранных условиях",
+    '<span class="spinner"></span>Сравниваем планы движком…',
+  );
+  try {
+    const response = await request(
+      "/api/compare",
+      {
+        plans: Object.fromEntries(
+          state.savedPlans.map((plan) => [plan.name, clone(plan.decisions)]),
+        ),
+        event_id: event,
+      },
+      "teams-compare",
+    );
+    if (version !== state.version || state.drawer !== "teams-compare") return;
+    if (response.errors?.length) throw new Error(response.errors.join(" "));
+    $("drawer-body").innerHTML =
+      comparisonHtml(response) +
+      '<button class="btn wide" id="back-saved-plans">К планам команд</button>';
+    $("back-saved-plans").onclick = openSavedPlans;
+  } catch (error) {
+    if (version === state.version && state.drawer === "teams-compare")
+      $("drawer-body").innerHTML =
+        `<div class="error-box">${esc(errorText(error))}</div>`;
+  }
+}
+
+// Печатный документ строится только из свежего result. HTML из чата не исполняется.
+function buildReportHtml(result, advisor) {
+  const effects = result.measures
+    .map(
+      (item) =>
+        `<article><h3>${esc(item.name)} · ${esc(item.district_name)}</h3><p>Вклад в Score: ${signed(item.score_contribution)}.</p><p>${Object.entries(
+          item.effects_realized || {},
+        )
+          .map(
+            ([key, value]) =>
+              `${esc(catalog.indicators[key]?.name || key)}: ${signed(value)}`,
+          )
+          .join("; ")}</p></article>`,
+    )
+    .join("");
+  const critical = result.critical_indicators || [];
+  const resolved = result.critical_resolved || [];
+  const synergies = result.synergies || [];
+  return `<header><p>Аким на 5 часов · учебная модель</p><h1>Решение команды</h1><p>${esc(eventName(state.event))}</p></header>
+    <section><h2>План и итог</h2><p class="score">${fmt(result.baseline.score)} → <b>${fmt(result.score)}</b></p><p>Изменение Score: <b>${signed(result.delta.score)}</b>. Горизонт: ${esc(catalog.horizon_quarters)} кварталов.</p><p>Стоимость: ${fmt(result.cost, 0)} у.е.; бюджет: ${fmt(result.budget, 0)} у.е.; остаток: ${fmt(result.budget_left, 0)} у.е.</p>
+    ${dataTable(
+      ["Проект", "Где", "Стоимость", "Вклад в Score"],
+      result.measures.map((item) => [
+        item.name,
+        item.district_name,
+        fmt(item.cost, 0),
+        signed(item.score_contribution),
+      ]),
+    )}
+    <p class="note">Состав прошёл серверную проверку. Вклад меры учитывает потерю синергий и не суммируется в общий прирост.</p></section>
+    <section><h2>Последствия для районов</h2>${dataTable(
+      ["Район", "D до", "D после", "Изменение"],
+      result.districts.map((row) => [
+        row.name,
+        fmt(row.D_before),
+        fmt(row.D_after),
+        signed(row.D_delta),
+      ]),
+    )}
+    <h3>Критические показатели</h3><p>Было: ${fmt(result.baseline.N_crit, 0)}; стало: ${fmt(result.N_crit, 0)}. Порог: строго ниже ${fmt(catalog.crit_threshold, 0)}.</p>
+    ${
+      resolved.length
+        ? `<h4>Вышли из критической зоны</h4>${dataTable(
+            ["Район / показатель", "До", "После"],
+            resolved.map((row) => [
+              `${row.district_name} · ${row.indicator_name}`,
+              fmt(row.before),
+              fmt(row.after),
+            ]),
+          )}`
+        : "<p>Ни один показатель не вышел из критической зоны.</p>"
+    }
+    ${
+      critical.length
+        ? dataTable(
+            ["Остались критическими", "Значение"],
+            critical.map((row) => [
+              `${row.district_name} · ${row.indicator_name}`,
+              fmt(row.value),
+            ]),
+          )
+        : "<p>Критических показателей не осталось.</p>"
+    }
+    <h3>Сработавшие синергии</h3>${
+      synergies.length
+        ? `<ul>${synergies
+            .map(
+              (item) =>
+                `<li>${esc(item.pair.map((id) => measure(id)?.name || id).join(" + "))}: ${esc(item.district_name)}; ${Object.entries(
+                  item.bonus || {},
+                )
+                  .map(
+                    ([key, value]) =>
+                      `${esc(catalog.indicators[key]?.name || key)} ${signed(value)}`,
+                  )
+                  .join(", ")}</li>`,
+            )
+            .join("")}</ul>`
+        : "<p>Синергии не сработали.</p>"
+    }</section>
+    <section><h2>Сильные стороны, риски и последствия</h2>${
+      advisor
+        ? `${advisor.offline ? `<p class="note">Советник работает в офлайн-режиме. ${esc(advisor.reason || "")}</p>` : ""}${markdown(advisor.answer)}<h3>Проверки советника</h3>${dataTable(
+            ["Инструмент", "Краткий результат"],
+            (advisor.tool_calls || []).map((call) => [
+              call.name,
+              call.summary || call.status || "",
+            ]),
+          )}`
+        : "<p>Разбор советника ещё не получен. Ниже — эффекты и вклад проектов непосредственно из движка.</p>"
+    }
+    <h3>Эффекты проектов</h3>${effects}<p class="note">Это результаты синтетической учебной модели, а не прогноз реальных показателей города. Расчётные данные доступны только для районов из модели; географические районы без показателей не включены в Score.</p></section>`;
+}
+function printReport() {
+  if (!state.result || state.resultKey !== currentKey() || locked())
+    return toast("Сначала рассчитайте текущий план.");
+  showDrawer(
+    "report",
+    "Отчёт команды",
+    "Готовая краткая презентация из результатов движка",
+    `<p class="small">Проверьте итог, последствия и разбор. В окне печати браузера можно выбрать «Сохранить как PDF».</p><button class="btn primary wide" id="print-preview-button">Печать / сохранить как PDF</button><div id="report-preview-root" class="report-preview">${buildReportHtml(state.result, state.advisor)}</div>`,
+  );
+  $("print-preview-button").onclick = () => {
+    document.body.classList.add("printing-report");
+    window.addEventListener(
+      "afterprint",
+      () => document.body.classList.remove("printing-report"),
+      { once: true },
+    );
+    try {
+      window.print();
+    } catch {
+      document.body.classList.remove("printing-report");
+      toast("Не удалось открыть печать. Используйте команду печати браузера.");
+    }
+  };
+}
+
 function openEvents() {
   if (!catalog) return;
   showDrawer(
@@ -1177,8 +1704,12 @@ function connection(online, text) {
   $("connection").classList.toggle("offline", !online);
   $("connection").innerHTML = `<i class="dot"></i><span>${esc(text)}</span>`;
 }
-async function bootstrap(event = null) {
+async function bootstrap(event = null, options = {}) {
   if (state.bootstrapBusy && event === state.requestedEvent) return;
+  const requestedPlan = clone(options.plan || state.plan);
+  state.restoring = !!options.restoration;
+  state.libraryRevision++;
+  state.optimizeRevision = (state.optimizeRevision || 0) + 1;
   state.requestedEvent = event;
   state.bootstrapBusy = true;
   state.live = false;
@@ -1212,7 +1743,7 @@ async function bootstrap(event = null) {
       throw new Error("Ответ сервера не содержит актуальных данных движка.");
     const status = await request(
       "/api/plan-status",
-      { decisions: clone(state.plan), event_id: event },
+      { decisions: requestedPlan, event_id: event },
       "plan-status",
     );
     if (version !== state.version) return;
@@ -1223,10 +1754,18 @@ async function bootstrap(event = null) {
       ? data.events
       : data.events?.events || [];
     state.event = event;
+    state.plan = requestedPlan;
     state.status = status;
     state.live = true;
     state.errors = [];
-    if (state.district && !district(state.district)) state.district = null;
+    if (
+      state.district &&
+      !district(state.district) &&
+      !geojson?.features?.some(
+        (feature) => feature.properties?.id === state.district,
+      )
+    )
+      state.district = null;
     for (const [mid, target] of Object.entries(state.targets))
       if (!district(target)) delete state.targets[mid];
     renderEvent();
@@ -1234,9 +1773,9 @@ async function bootstrap(event = null) {
     const approximate = geojson?.features?.some(
       (feature) => feature.properties?.source === "fallback_approx",
     );
-    document.querySelector(".map-footer").textContent = approximate
-      ? "Границы районов схематичны · Учебная модель"
-      : "Учебная модель · данные движка";
+    const geographicCount = geojson?.features?.length || 0;
+    document.querySelector(".map-footer").textContent =
+      `${approximate ? "Границы районов схематичны" : geojson?.metadata?.source === "osm" ? "Границы OpenStreetMap (не юридически официальные)" : "Границы — географический контекст"} · На карте: ${geographicCount}; в модели: ${baseline.districts.length}`;
     if (!geojson?.features?.length) {
       // Геометрия не подменяется сохранённым примером даже при переключении события.
       map?.remove();
@@ -1256,7 +1795,9 @@ async function bootstrap(event = null) {
     if (!catalog)
       $("panel").innerHTML =
         `<div class="error-box"><b>Не удалось загрузить город</b><p>${esc(errorText(error))}</p><p>Запустите Python-сервер приложения. Без API расчёты недоступны.</p></div><button class="btn lime" id="retry-bootstrap">Повторить подключение</button>`;
-    $("retry-bootstrap")?.addEventListener("click", () => bootstrap(event));
+    $("retry-bootstrap")?.addEventListener("click", () =>
+      bootstrap(event, options),
+    );
   } finally {
     if (version === state.version) {
       state.bootstrapBusy = false;
@@ -1266,10 +1807,14 @@ async function bootstrap(event = null) {
           "afterbegin",
           '<button class="btn wide" id="retry-bootstrap">Повторить подключение</button>',
         );
-        $("retry-bootstrap").onclick = () => bootstrap(event);
+        $("retry-bootstrap").onclick = () => bootstrap(event, options);
       }
       if (state.live && state.plan.length === catalog.num_decisions)
-        void calculate();
+        await calculate({ restoration: options.restoration });
+      if (version === state.version) {
+        state.restoring = false;
+        persistSession();
+      }
     }
   }
 }
@@ -1354,6 +1899,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("show-before").onclick = () => setPhase(false);
   $("show-after").onclick = () => setPhase(true);
   $("events-button").onclick = openEvents;
+  $("saved-plans-button")?.addEventListener("click", openSavedPlans);
+  $("print-report-button")?.addEventListener("click", printReport);
   $("tour-button").onclick = () => {
     if (!state.live) return;
     if (state.event) return toast("Для демо сначала выключите событие.");
@@ -1387,5 +1934,19 @@ document.addEventListener("DOMContentLoaded", () => {
       if (catalog) renderTour();
     }
   });
-  void bootstrap();
+  const saved = readSession();
+  if (saved) {
+    state.plan = saved.plan;
+    state.savedPlans = saved.savedPlans;
+    state.district = typeof saved.district === "string" ? saved.district : null;
+    state.targets =
+      saved.targets && typeof saved.targets === "object" ? saved.targets : {};
+    state.tab = ["overview", "projects", "results"].includes(saved.tab)
+      ? saved.tab
+      : "overview";
+    state.mapMetric =
+      typeof saved.mapMetric === "string" ? saved.mapMetric : "D";
+    void bootstrap(saved.event || null, { restoration: saved });
+  } else void bootstrap();
 });
+window.addEventListener("pagehide", persistSession);

@@ -3,24 +3,24 @@
 """
 fetch_districts.py
 
-Скачивает границы 5 районов Астаны (Есиль, Алматы, Сарыарка, Байконур, Нура)
+Скачивает реальные OSM-границы шести районов Астаны, включая Сарайшык,
 из OpenStreetMap через Overpass API и сохраняет data/astana_districts.geojson.
 
 У каждого района в результате есть свойства:
-    id    — строго один из: esil, almaty, saryarka, baikonur, nura
+    id    — esil, almaty, saryarka, baikonur, nura, saraishyk
     name  — название по-русски
 и служебные: name_full, source, osm_id, osm_names, area_km2, center_lon, center_lat
 (center_* удобно использовать для подписей районов в pydeck TextLayer).
 
-Если скачать не получилось (нет сети, Overpass перегружен, в OSM не нашёлся
-какой-то район — например, Нура создана только в 2022 году и может быть ещё
-не отрисована), пишется запасной СХЕМАТИЧНЫЙ GeoJSON, чтобы карта работала.
+При ошибке скачивания существующий GeoJSON сохраняется. Схематичные границы
+не создаются. OSM — общественная карта, а не юридически заверенные границы.
+Сарайшык присутствует на карте, но не входит в расчётную модель из ТЗ.
 
 Данные OSM: © участники OpenStreetMap, лицензия ODbL — укажите это на карте.
 
 Запуск:
-    python fetch_districts.py             # скачать из OSM (с запасным вариантом)
-    python fetch_districts.py --offline   # сразу записать схематичные полигоны
+    python -B fetch_districts.py             # обновить из OSM
+    python -B fetch_districts.py --offline   # собрать из сохранённого ответа OSM
 """
 
 from __future__ import annotations
@@ -32,12 +32,13 @@ import re
 import sys
 import time
 import unicodedata
+from itertools import combinations
 from datetime import datetime, timezone
 from pathlib import Path
 
 try:
     import requests
-except ImportError:  # без requests просто уйдём в запасной вариант
+except ImportError:  # для --offline сеть и requests не нужны
     requests = None
 
 
@@ -49,8 +50,7 @@ except ImportError:  # без requests просто уйдём в запасно
 # рабочей директории.
 ROOT = Path(__file__).resolve().parent
 OUT_PATH = ROOT / "data" / "astana_districts.geojson"
-# Сюда кладём то, что удалось найти в OSM, если нашлись не все 5 районов (для отладки).
-PARTIAL_PATH = ROOT / "data" / "astana_districts_osm_partial.geojson"
+CACHE_PATH = ROOT / "data" / "geo_sources" / "astana_districts_overpass.json"
 
 # Публичные серверы Overpass API. Пробуем по очереди: основной часто перегружен.
 OVERPASS_URLS = [
@@ -58,15 +58,11 @@ OVERPASS_URLS = [
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
-USER_AGENT = "akim-5h-simulator/1.0 (hackathon project, Streamlit + pydeck)"
+USER_AGENT = "akim-5h-simulator/1.0 (public district boundary downloader)"
 
 # Рамка вокруг Астаны: (юг, запад, север, восток). Нужна для запроса по рамке
 # и для проверки, что найденная граница действительно в Астане.
-ASTANA_BBOX = (50.95, 71.10, 51.35, 71.85)
-
-# Wikidata-идентификатор Астаны — самый надёжный способ найти город в OSM,
-# не завися от того, на каком языке записан тег name.
-ASTANA_WIKIDATA = "Q1520"
+ASTANA_BBOX = (50.90, 71.0, 51.5, 72.0)
 
 # Наши районы. keywords — корни названий, по которым ищем совпадения в тегах OSM.
 # В OSM районы могут называться по-казахски («Есіл ауданы», «Байқоңыр ауданы»),
@@ -100,8 +96,19 @@ DISTRICTS = {
         "name_full": "район Нура",
         "keywords": ["нура", "nura"],
     },
+    "saraishyk": {
+        "name": "Сарайшык",
+        "name_full": "район Сарайшык",
+        "keywords": ["сарайшык", "saraishyk", "saray", "saraishy", "saraish", "saraisy"],
+    },
 }
 DISTRICT_ORDER = list(DISTRICTS.keys())
+# Явные идентификаторы исключают одноимённые районы области и старые дубли.
+# У Сарайшыка в OSM admin_level=8, у остальных =6; это теги источника.
+RELATION_IDS = {
+    "esil": 3479876, "almaty": 3482819, "saryarka": 3486954,
+    "baikonur": 8593081, "nura": 20593940, "saraishyk": 19733918,
+}
 
 # Теги с названиями, которые проверяем (old_name сознательно не берём:
 # старые названия могут указывать на соседний район).
@@ -256,11 +263,7 @@ def assemble_rings(ways):
                 break
             if not attached:
                 break
-        # Если кольцо почти замкнулось (зазор < ~100 м) — замыкаем принудительно.
-        if current[0] != current[-1] and len(current) >= 3:
-            dx, dy = current[0][0] - current[-1][0], current[0][1] - current[-1][1]
-            if math.hypot(dx, dy) < 0.001:
-                current.append(current[0])
+        # Не дорисовываем даже небольшие разрывы: геометрия должна быть из OSM.
         if current[0] == current[-1] and len(current) >= 4:
             rings.append(current)
         else:
@@ -272,15 +275,21 @@ def relation_to_geometry(element: dict):
     """Собирает GeoJSON-геометрию из отношения Overpass (вывод `out geom`)."""
     outer_ways, inner_ways = [], []
     for m in element.get("members", []):
-        if m.get("type") != "way" or not m.get("geometry"):
+        if m.get("type") != "way":
             continue
-        coords = [(round(p["lon"], 7), round(p["lat"], 7)) for p in m["geometry"] if p]
+        if m.get("role") not in ("outer", "inner", ""):
+            continue
+        if not m.get("geometry"):
+            return None, 1
+        if any(p is None for p in m["geometry"]):
+            return None, 1
+        coords = [(p["lon"], p["lat"]) for p in m["geometry"]]
         (inner_ways if m.get("role") == "inner" else outer_ways).append(coords)
 
     outers, broken_outer = assemble_rings(outer_ways)
-    inners, _ = assemble_rings(inner_ways)
-    if not outers:
-        return None, broken_outer
+    inners, broken_inner = assemble_rings(inner_ways)
+    if not outers or broken_outer or broken_inner:
+        return None, broken_outer + broken_inner
 
     # Самые большие внешние кольца — первыми; каждой дыре находим её внешнее кольцо.
     outers.sort(key=lambda r: abs(ring_signed_area(r)), reverse=True)
@@ -290,11 +299,14 @@ def relation_to_geometry(element: dict):
             if point_in_ring(hole[0], poly[0]):
                 poly.append(orient(hole, ccw=False))
                 break
+        else:
+            return None, 1
 
-    coords6 = [[[[round(x, 6), round(y, 6)] for x, y in ring] for ring in poly] for poly in polygons]
-    if len(coords6) == 1:
-        return {"type": "Polygon", "coordinates": coords6[0]}, broken_outer
-    return {"type": "MultiPolygon", "coordinates": coords6}, broken_outer
+    # Сохраняем исходную точность OSM; не упрощаем и не сдвигаем вершины.
+    coordinates = [[[[x, y] for x, y in ring] for ring in poly] for poly in polygons]
+    if len(coordinates) == 1:
+        return {"type": "Polygon", "coordinates": coordinates[0]}, broken_outer
+    return {"type": "MultiPolygon", "coordinates": coordinates}, broken_outer
 
 
 # ---------------------------------------------------------------------------
@@ -315,9 +327,9 @@ def overpass_query(query: str, timeout: int, deadline: float, rounds: int = 2) -
                 raise OverpassError(f"превышен общий лимит времени; последняя ошибка: {last_error}")
             try:
                 print(f"    -> {url}")
-                resp = requests.post(
+                resp = requests.get(
                     url,
-                    data={"data": query},
+                    params={"data": query},
                     headers={"User-Agent": USER_AGENT},
                     timeout=(10, min(timeout, remaining)),
                 )
@@ -333,6 +345,13 @@ def overpass_query(query: str, timeout: int, deadline: float, rounds: int = 2) -
                     last_error = f"ошибка Overpass: {remark}"
                     print(f"       {last_error}")
                     continue
+                if remark:
+                    raise ValueError("Overpass вернул неполный ответ: " + remark)
+                data["_provenance"] = {
+                    "source_url": resp.url,
+                    "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "relation_ids": list(RELATION_IDS.values()),
+                }
                 return data
             except requests.exceptions.RequestException as exc:
                 last_error = f"сетевая ошибка: {exc.__class__.__name__}: {exc}"
@@ -347,31 +366,6 @@ def overpass_query(query: str, timeout: int, deadline: float, rounds: int = 2) -
     raise OverpassError(last_error)
 
 
-def build_queries():
-    """Две стратегии поиска: по территории города и (запасная) по рамке."""
-    s, w, n, e = ASTANA_BBOX
-    # 1) Территория Астаны (по wikidata или по имени), внутри — все
-    #    административные границы уровней 5–9. Районы города в Казахстане
-    #    обычно admin_level=6, но уровень не гарантирован — фильтруем по названиям.
-    by_area = f"""
-[out:json][timeout:120];
-(
-  area["wikidata"="{ASTANA_WIKIDATA}"];
-  area["boundary"="administrative"]["admin_level"="4"]["name"~"^(Астана|Astana)$"];
-  area["boundary"="administrative"]["admin_level"="4"]["name:en"="Astana"];
-)->.city;
-rel(area.city)["boundary"="administrative"]["admin_level"~"^(5|6|7|8|9)$"];
-out geom;
-"""
-    # 2) Если территория города не нашлась — все такие границы в рамке вокруг Астаны.
-    by_bbox = f"""
-[out:json][timeout:120];
-rel["boundary"="administrative"]["admin_level"~"^(5|6|7|8|9)$"]({s},{w},{n},{e});
-out geom;
-"""
-    return [("по территории города", by_area), ("по рамке вокруг Астаны", by_bbox)]
-
-
 def in_astana_bbox(lon: float, lat: float) -> bool:
     s, w, n, e = ASTANA_BBOX
     return s <= lat <= n and w <= lon <= e
@@ -384,145 +378,85 @@ def describe_tags(tags: dict) -> str:
 
 
 def fetch_from_osm(timeout: int, max_time: int):
-    """
-    Скачивает границы и сопоставляет их с нашими id.
-    Возвращает FeatureCollection или None, если нашлись не все 5 районов.
-    """
+    """Получает именно шесть отношений; кэш обновляется только после проверок."""
     deadline = time.monotonic() + max_time
-    found: dict[str, dict] = {}
+    ids = ",".join(str(value) for value in RELATION_IDS.values())
+    query = f"[out:json][timeout:{min(timeout, 90)}];rel(id:{ids});out meta geom;"
+    data = overpass_query(query, timeout, deadline)
+    collection = collection_from_osm(data)
+    write_geojson(CACHE_PATH, data)
+    return collection
 
-    for label, query in build_queries():
-        print(f"\n[*] Запрос к Overpass ({label})...")
-        try:
-            data = overpass_query(query, timeout, deadline)
-        except OverpassError as exc:
-            print(f"[!] Стратегия «{label}» не сработала: {exc}")
-            continue
 
-        relations = [el for el in data.get("elements", []) if el.get("type") == "relation"]
-        print(f"[*] Получено административных границ: {len(relations)}")
-
-        for el in relations:
-            tags = el.get("tags", {})
-            ids = match_district_ids(tags)
-            level = tags.get("admin_level", "?")
-            if not ids:
-                print(f"    rel {el['id']} [level {level}] {describe_tags(tags)} -> не наш район")
-                continue
-            if len(ids) > 1:
-                print(f"    rel {el['id']} {describe_tags(tags)} -> неоднозначно {sorted(ids)}, пропуск")
-                continue
-            did = ids.pop()
-
-            geometry, broken = relation_to_geometry(el)
-            if geometry is None:
-                print(f"    rel {el['id']} {describe_tags(tags)} -> {did}, но геометрию собрать не удалось")
-                continue
-            area_km2, (clon, clat) = geometry_stats(geometry)
-            if not in_astana_bbox(clon, clat):
-                print(f"    rel {el['id']} {describe_tags(tags)} -> похоже на {did}, но не в Астане, пропуск")
-                continue
-
-            note = f", незамкнутых кусков: {broken}" if broken else ""
-            print(f"    rel {el['id']} [level {level}] {describe_tags(tags)} -> {did} "
-                  f"(~{area_km2:.0f} км²{note})")
-
-            try:
-                level_num = int(level)
-            except ValueError:
-                level_num = 99
-            candidate = {
-                "osm_id": el["id"], "level": level_num, "tags": tags,
-                "geometry": geometry, "area_km2": area_km2,
-            }
-            # Если кандидатов на один id несколько — берём более высокий уровень
-            # иерархии (меньший admin_level), при равенстве — больший по площади.
-            best = found.get(did)
-            if best is None or (level_num, -area_km2) < (best["level"], -best["area_km2"]):
-                found[did] = candidate
-
-        if len(found) == len(DISTRICTS):
-            break
-
-    if not found:
-        return None
-
-    features = [
-        make_feature(
-            did, found[did]["geometry"], source="osm", osm_id=found[did]["osm_id"],
-            osm_names={k: found[did]["tags"][k] for k in NAME_TAGS if found[did]["tags"].get(k)},
-        )
-        for did in DISTRICT_ORDER if did in found
-    ]
-    missing = [did for did in DISTRICT_ORDER if did not in found]
-    if missing:
-        print(f"\n[!] В OSM не нашлись районы: {', '.join(missing)}")
-        write_geojson(PARTIAL_PATH, make_collection(features, source="osm_partial"))
-        print(f"[!] Найденное сохранено для отладки: {PARTIAL_PATH.relative_to(ROOT)}")
-        return None
-
-    check_overlaps(features)
-    return make_collection(features, source="osm")
+def collection_from_osm(data):
+    """Повторяемая сборка из сохранённого сырого ответа Overpass."""
+    provenance = data.get("_provenance", {})
+    if not provenance.get("retrieved_at") or not provenance.get("source_url"):
+        raise ValueError("У ответа OSM нет метаданных источника и времени получения")
+    relations = {e["id"]: e for e in data.get("elements", []) if e.get("type") == "relation"}
+    features = []
+    for did, relation_id in RELATION_IDS.items():
+        element = relations.get(relation_id)
+        if not element:
+            raise ValueError(f"В ответе OSM отсутствует {did}: relation {relation_id}")
+        tags = element.get("tags", {})
+        if tags.get("boundary") != "administrative" or did not in match_district_ids(tags):
+            raise ValueError(f"Неожиданные теги района {did}: relation {relation_id}")
+        geometry, broken = relation_to_geometry(element)
+        if geometry is None or broken:
+            raise ValueError(f"Незамкнутая или неполная граница {did}; файл не обновлён")
+        features.append(make_feature(
+            did, geometry, source="osm", osm_id=relation_id,
+            osm_names={k: tags[k] for k in NAME_TAGS if tags.get(k)},
+            retrieved_at=provenance["retrieved_at"],
+            osm_timestamp=element.get("timestamp"), osm_version=element.get("version"),
+            osm_admin_level=tags.get("admin_level"),
+        ))
+    validation = check_overlaps(features)
+    collection = make_collection(features, source="osm")
+    collection["metadata"].update({
+        "source_url": provenance["source_url"],
+        "retrieved_at": provenance["retrieved_at"],
+        "osm_base_timestamp": data.get("osm3s", {}).get("timestamp_osm_base"),
+        "validation": validation,
+    })
+    return collection
 
 
 def check_overlaps(features):
-    """Предупреждает, если центр одного района внутри другого — признак устаревших границ
-    (например, старый Есиль до выделения Нуры в 2022 году)."""
-    for a in features:
-        pt = (a["properties"]["center_lon"], a["properties"]["center_lat"])
-        for b in features:
-            if a is not b and point_in_geometry(pt, b["geometry"]):
-                print(f"[!] Внимание: центр района {a['properties']['id']} лежит внутри "
-                      f"{b['properties']['id']} — возможно, границы в OSM устарели.")
-
-
-# ---------------------------------------------------------------------------
-# Запасной вариант: схематичные полигоны
-# ---------------------------------------------------------------------------
-
-def build_fallback():
-    """
-    Схематичные полигоны районов, разбивающие рамку города без пропусков.
-    Логика: Ишим (Есиль) делит город на правый (северный) и левый (южный) берег.
-      Правый берег: Сарыарка — запад (старый центр, ж/д вокзал),
-                    Байконур — центр, Алматы — восток (оба берега на востоке).
-      Левый берег:  Есиль — новый административный центр (Байтерек, Ак Орда),
-                    Нура — юг и юго-запад (выделена из Есиля в 2022 году).
-    ЭТО ПРИБЛИЗИТЕЛЬНАЯ СХЕМА для демо, а не официальные границы.
-    """
-    # Условная линия реки с запада на восток (lon, lat).
-    river = [
-        (71.25, 51.150), (71.34, 51.170), (71.36, 51.170), (71.39, 51.168),
-        (71.42, 51.160), (71.45, 51.145), (71.49, 51.135), (71.52, 51.1325),
-        (71.55, 51.130), (71.65, 51.123),
-    ]
-    north, south, west, east, mid = 51.23, 51.02, 71.25, 71.65, 51.085
-    r = {lon: (lon, lat) for lon, lat in river}  # быстрый доступ к точкам реки по долготе
-
-    rings = {
-        "saryarka": [r[71.25], r[71.34], r[71.36], r[71.39], r[71.42],
-                     (71.42, north), (west, north)],
-        "baikonur": [r[71.42], r[71.45], r[71.49], (71.49, north), (71.42, north)],
-        "almaty":   [r[71.49], r[71.52], (71.52, mid), (east, mid), (east, north), (71.49, north)],
-        "esil":     [r[71.36], (71.36, mid), (71.52, mid), r[71.52], r[71.49], r[71.45],
-                     r[71.42], r[71.39]],
-        "nura":     [r[71.25], (west, south), (east, south), (east, mid), (71.52, mid),
-                     (71.36, mid), r[71.36], r[71.34]],
-    }
-    features = []
-    for did in DISTRICT_ORDER:
-        ring = rings[did] + [rings[did][0]]  # замыкаем кольцо
-        ring = [[x, y] for x, y in orient(ring, ccw=True)]
-        features.append(make_feature(did, {"type": "Polygon", "coordinates": [ring]},
-                                     source="fallback_approx"))
-    return make_collection(features, source="fallback_approx")
+    """Базовые проверки всегда; полная топология и пересечения — с Shapely."""
+    for feature in features:
+        geometry = feature["geometry"]
+        polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+        for polygon in polygons:
+            for ring in polygon:
+                if len(ring) < 4 or ring[0] != ring[-1] or abs(ring_signed_area(ring)) < 1e-12:
+                    raise ValueError("Вырожденное или открытое кольцо " + feature["id"])
+                if not all(math.isfinite(x) and math.isfinite(y) and in_astana_bbox(x, y) for x, y in ring):
+                    raise ValueError("Координаты вне Астаны: " + feature["id"])
+    try:
+        from shapely.geometry import shape
+        from shapely.validation import explain_validity
+    except ImportError:
+        print("[!] Shapely не установлен: проверены кольца и координаты, но не полная топология.")
+        return {"rings_closed": True, "coordinates_checked": True, "topology_checked": False}
+    geometries = {f["id"]: shape(f["geometry"]) for f in features}
+    for did, geometry in geometries.items():
+        if not geometry.is_valid:
+            raise ValueError(f"Невалидная геометрия {did}: {explain_validity(geometry)}")
+    for (a, geom_a), (b, geom_b) in combinations(geometries.items(), 2):
+        # Общая линия допустима, положительная площадь пересечения — ошибка.
+        if geom_a.intersection(geom_b).area > 1e-12:
+            raise ValueError(f"Районы {a} и {b} перекрываются; файл не обновлён")
+    return {"rings_closed": True, "coordinates_checked": True, "topology_checked": True,
+            "all_geometries_valid": True, "overlapping_pairs": 0, "checked_pairs": 15}
 
 
 # ---------------------------------------------------------------------------
 # Сборка и запись GeoJSON
 # ---------------------------------------------------------------------------
 
-def make_feature(did, geometry, source, osm_id=None, osm_names=None):
+def make_feature(did, geometry, source, osm_id=None, osm_names=None, **provenance):
     info = DISTRICTS[did]
     area_km2, (clon, clat) = geometry_stats(geometry)
     return {
@@ -532,30 +466,36 @@ def make_feature(did, geometry, source, osm_id=None, osm_names=None):
             "id": did,
             "name": info["name"],
             "name_full": info["name_full"],
-            "source": source,            # "osm" или "fallback_approx"
-            "osm_id": osm_id,            # id отношения в OSM (или null)
+            "source": source,
+            "osm_id": osm_id,
+            "source_url": f"https://www.openstreetmap.org/relation/{osm_id}",
+            "scoring_enabled": did != "saraishyk",
+            "geometry_status": "osm_community_boundary",
             "osm_names": osm_names or {},
             "area_km2": round(area_km2, 1),
+            "area_method": "approximate_planar_area_at_centroid_latitude",
             "center_lon": round(clon, 5),
             "center_lat": round(clat, 5),
+            **provenance,
         },
         "geometry": geometry,
     }
 
 
 def make_collection(features, source):
-    if source.startswith("osm"):
-        attribution = "© OpenStreetMap contributors (ODbL)"
-        note = "Границы районов из OpenStreetMap через Overpass API."
-    else:
-        attribution = "Схематичные полигоны (не официальные границы)"
-        note = "Запасной вариант: приблизительное расположение районов для демо."
+    if source != "osm":
+        raise ValueError("Допускаются только реальные границы OSM")
+    attribution = "© OpenStreetMap contributors (ODbL)"
+    note = ("Реальные полигоны административных отношений OpenStreetMap. "
+            "Общественный источник, не официальное юридическое описание границ. "
+            "Сарайшык показан географически, но отсутствует в расчётном наборе ТЗ.")
     return {
         "type": "FeatureCollection",
         "metadata": {
             "source": source,
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "attribution": attribution,
+            "license_url": "https://www.openstreetmap.org/copyright",
             "note": note,
         },
         "features": features,
@@ -573,7 +513,9 @@ def write_geojson(path: Path, collection: dict):
 def parse_args():
     p = argparse.ArgumentParser(description="Границы районов Астаны из OpenStreetMap")
     p.add_argument("--offline", action="store_true",
-                   help="не ходить в сеть, сразу записать схематичные полигоны")
+                   help="не ходить в сеть; использовать сохранённый сырой ответ OSM")
+    p.add_argument("--source-json", type=Path,
+                   help="собрать GeoJSON из указанного ответа Overpass с _provenance")
     p.add_argument("--timeout", type=int, default=120,
                    help="таймаут одного запроса к Overpass, с (по умолчанию 120)")
     p.add_argument("--max-time", type=int, default=300,
@@ -585,20 +527,17 @@ def main() -> int:
     args = parse_args()
     collection = None
 
-    if args.offline:
-        print("[*] Режим --offline: пропускаю скачивание.")
-    elif requests is None:
-        print("[!] Библиотека requests не установлена (pip install requests) — запасной вариант.")
-    else:
-        try:
+    try:
+        if args.offline or args.source_json:
+            source_path = args.source_json or CACHE_PATH
+            collection = collection_from_osm(json.loads(source_path.read_text(encoding="utf-8")))
+        elif requests is None:
+            raise RuntimeError("Для скачивания установите requests либо используйте --offline")
+        else:
             collection = fetch_from_osm(args.timeout, args.max_time)
-        except Exception as exc:  # на хакатоне карта важнее: любая ошибка -> запасной вариант
-            print(f"[!] Непредвиденная ошибка при разборе данных OSM: {exc!r}")
-            collection = None
-
-    if collection is None:
-        print("\n[*] Записываю запасной схематичный GeoJSON (приблизительные полигоны).")
-        collection = build_fallback()
+    except Exception as exc:
+        print(f"[x] Обновление отменено: {exc}. Существующий GeoJSON не изменён.")
+        return 1
 
     try:
         write_geojson(OUT_PATH, collection)
@@ -612,10 +551,12 @@ def main() -> int:
         p = feat["properties"]
         print(f"     {p['id']:<9} {p['name']:<9} ~{p['area_km2']:>6.1f} км²  "
               f"центр {p['center_lat']:.4f}, {p['center_lon']:.4f}")
-    if src != "osm":
-        print("     Внимание: это схема, а не реальные границы. Повторите запуск при наличии сети.")
     return 0
 
 
 if __name__ == "__main__":
+    # Русский журнал и знак км² должны работать и при перенаправлении в Windows.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())

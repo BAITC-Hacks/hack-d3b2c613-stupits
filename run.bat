@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 >nul
+rem Согласуем кодировку Python с консолью Windows, включая перенаправленный вывод.
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 cd /d "%~dp0"
 
 rem «Аким на 5 часов» — запуск одной командой (Windows): run.bat

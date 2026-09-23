@@ -103,6 +103,22 @@ class WebChecks(unittest.TestCase):
         self.assertEqual((result["score"], result["delta"]["score"], result["cost"]), (56.54, 3.99, 95))
         self.assertEqual(self.post("/api/validate", {"decisions": EXAMPLE}), engine.validate(EXAMPLE))
 
+    def test_geographic_district_does_not_get_invented_model_values(self):
+        _, _, bootstrap = self.request("GET", "/api/bootstrap")
+        scope = bootstrap["model_scope"]
+        self.assertEqual(scope["district_ids"], [d["id"] for d in engine.baseline()["districts"]])
+        self.assertNotIn("saraishyk", scope["district_ids"])
+        if bootstrap["geojson"]:
+            ids = [feature["properties"]["id"] for feature in bootstrap["geojson"]["features"]]
+            self.assertEqual(scope["geographic_district_ids"], ids)
+            if "saraishyk" in ids:
+                self.assertIn("saraishyk", scope["unmodeled_district_ids"])
+        plan = [{"measure": "M7", "district": "saraishyk"}, *EXAMPLE[1:]]
+        result = self.post("/api/simulate", {"decisions": plan})
+        self.assertFalse(result["valid"])
+        self.assertIsNone(result["score"])
+        self.assertEqual(result, engine.simulate(plan))
+
     def test_optimize_top_five_and_budget_constraint(self):
         result = self.post("/api/optimize", {"top_n": 5})
         self.assertEqual(result["errors"], [])
