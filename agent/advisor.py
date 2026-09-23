@@ -93,11 +93,24 @@ def _rule_notice(question: str, rules: dict) -> str:
     return ""
 
 
+def _current_plan_risks(question: str) -> bool:
+    """Оставшиеся проблемы относятся к результату мер, а не к baseline города."""
+    text = question.lower().replace("ё", "е")
+    if re.search(r"\b(?:исходн\w*|изначальн\w*|базов\w*)\b|\b(?:до|без)\s+(?:мер|проект\w*|решени\w*)", text):
+        return False
+    risk = re.search(r"\b(?:риск\w*|проблем\w*|критич\w*|слаб\w*)\b", text)
+    current = re.search(r"\b(?:остал\w*|остают\w*|текущ\w*|нашего|нашем|моего|моем|мой)\b|"
+                        r"после\s+(?:событи\w*|мер|проект\w*|реализаци\w*)", text)
+    return bool(risk and current)
+
+
 def _run_model(client, settings: dict, question: str, decisions: list, tools: EngineTools,
                *, history=None, checked_plans=None, rule_notice="") -> str:
     previous = _checked(checked_plans, tools.event_id)
     same_cheaper = (previous and re.search(r"(?:этот|тот|такой)\s+же\s+(?:набор|план|состав)", question.lower())
                     and "дешев" in question.lower())
+    current_risks = (question != AUTO_QUESTION and not rule_notice and not same_cheaper
+                     and _current_plan_risks(question))
     discussed = previous[-1]["decisions"] if same_cheaper else decisions
     # Недопустимые числа из просьбы не становятся фактами движка. Отказ уже
     # формирует приложение; модели остаётся объяснить найденный допустимый план.
@@ -109,6 +122,7 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
                     "question": model_question, "current_decisions": discussed,
                     "catalogue": tools.catalogue(), "checked_plans": previous,
                     "selected_event_id": tools.event_id,
+                    "analysis_scope": "current_plan_after_measures" if current_risks else None,
                     "rule_notice": rule_notice,
                     "prepared_facts": [tools.model_payload(eid, brief=True) for eid in tools.evidence],
                 })}]
@@ -125,7 +139,7 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
         choice = "none" if final else ("auto" if model_used_tool else "required")
         if step == 0 and (question == AUTO_QUESTION or rule_notice):
             choice = {"type": "function", "function": {"name": "optimize"}}
-        elif step == 0 and same_cheaper:
+        elif step == 0 and (same_cheaper or current_risks):
             choice = {"type": "function", "function": {"name": "simulate"}}
         completion = client.chat.completions.create(
             model=settings["OPENAI_MODEL"], messages=messages, tools=TOOL_SCHEMAS,
@@ -153,21 +167,37 @@ def _run_model(client, settings: dict, question: str, decisions: list, tools: En
                 except (ValueError, TypeError):
                     arguments = None
                 requested = deepcopy(arguments)
+                executed_name = call.function.name
                 # Свободный поиск гарантирован кодом, а не только пожеланием в промпте.
                 if (question == AUTO_QUESTION or rule_notice) and call.function.name == "optimize":
                     arguments = {"constraints": {}}
                 if same_cheaper and call.function.name == "simulate":
                     arguments = {"decisions": discussed}
-                response = tools.call(call.function.name, arguments)
-                if requested != arguments:
+                if current_risks:
+                    # Некоторые совместимые API игнорируют forced tool_choice.
+                    # Не выполняем baseline вместо оценки оставшихся проблем.
+                    executed_name = "simulate"
+                    arguments = {"decisions": decisions}
+                response = tools.call(executed_name, arguments)
+                if requested != arguments or executed_name != call.function.name:
                     tools.trace[-1]["requested_arguments"] = requested
+                    tools.trace[-1]["requested_name"] = call.function.name
                     tools.trace[-1]["note"] = (
-                        "Уточнение относится к последнему обсуждавшемуся набору."
+                        "Оставшиеся риски проверяем после текущих мер, в выбранных условиях события."
+                        if current_risks else "Уточнение относится к последнему обсуждавшемуся набору."
                         if same_cheaper else "Ищем свободную допустимую альтернативу без закрепления текущих мер.")
                 model_used_tool |= response["status"] != "error"
                 successful_tool |= response["status"] == "ok"
                 if response["evidence_id"] in tools.evidence:
                     payload = tools.model_payload(response["evidence_id"])
+                    if current_risks:
+                        payload["executed_tool"] = "simulate"
+                        payload["analysis_scope"] = "current_plan_after_measures"
+                        payload["instruction"] = (
+                            "Ответь о рисках, оставшихся ПОСЛЕ текущих проектов в выбранном событии. "
+                            "Бери их только из N_crit, critical_indicators и min_district этого результата. "
+                            "baseline — состояние ДО проектов: его критические значения уже могли быть устранены. "
+                            "Не называй baseline.N_crit или baseline.min_district оставшимися проблемами.")
                     if same_cheaper:
                         payload["instruction"] = (
                             "Это именно ранее обсуждавшийся набор. Ответь кратко: его стоимость cost фиксирована, "

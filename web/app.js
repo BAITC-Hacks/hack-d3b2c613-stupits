@@ -1,3 +1,26 @@
-'use strict';
+"use strict";
 // Данные и расчёты поступают только из Python API.
-const icons={city:'<path d="M3 21V9l5-3v15M8 21V3h8v18M16 21V11h5v10M1 21h22M11 7h2m-2 4h2m-2 4h2"/>',arrow:'<path d="M5 12h14m-6-6 6 6-6 6"/>',back:'<path d="M19 12H5m6-6-6 6 6 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',minus:'<path d="M5 12h14"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',bolt:'<path d="m13 2-9 12h7l-1 8 10-13h-7z"/>',play:'<path d="m9 5 11 7-11 7z"/>',locate:'<circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>',rotate:'<path d="M20 11a8 8 0 1 0-2 7M20 4v7h-7"/>',spark:'<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5zM20 2v4m-2-2h4"/>',leaf:'<path d="M20 3C7 2 2 9 5 16s15 5 15-13ZM5 20 16 9"/>',school:'<path d="m2 8 10-5 10 5-10 5zM6 10v6q6 5 12 0v-6M22 8v8"/>',shield:'<path d="m12 3 8 3v6q-1 6-8 9-7-3-8-9V6z"/><path d="m8 12 3 3 5-6"/>',bus:'<rect x="5" y="3" width="14" height="16" rx="3"/><path d="M5 11h14M8 19v2m8-2v2M8 15h1m6 0h1M8 6h8"/>',service:'<path d="m14 4 6 6-9 9H5v-6zM12 6l6 6M3 21h18"/>',chart:'<path d="M4 3v18h18M8 16v-4m5 4V8m5 8V5"/>',chat:'<path d="M20 16h-9l-6 4v-4H3V4h17zM7 8h9m-9 4h6"/>',check:'<path d="m5 12 4 4L19 6"/>'};
+const icons = {
+  city: '<path d="M3 21V9l5-3v15M8 21V3h8v18M16 21V11h5v10M1 21h22M11 7h2m-2 4h2m-2 4h2"/>',
+  arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+  back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  close: '<path d="m6 6 12 12M6 18 18 6"/>',
+  bolt: '<path d="m13 2-9 12h7l-1 8 10-13h-7z"/>',
+  play: '<path d="m9 5 11 7-11 7z"/>',
+  locate:
+    '<circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>',
+  rotate: '<path d="M20 11a8 8 0 1 0-2 7M20 4v7h-7"/>',
+  spark:
+    '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5zM20 2v4m-2-2h4"/>',
+  leaf: '<path d="M20 3C7 2 2 9 5 16s15 5 15-13ZM5 20 16 9"/>',
+  school: '<path d="m2 8 10-5 10 5-10 5zM6 10v6q6 5 12 0v-6M22 8v8"/>',
+  shield:
+    '<path d="m12 3 8 3v6q-1 6-8 9-7-3-8-9V6z"/><path d="m8 12 3 3 5-6"/>',
+  bus: '<rect x="5" y="3" width="14" height="16" rx="3"/><path d="M5 11h14M8 19v2m8-2v2M8 15h1m6 0h1M8 6h8"/>',
+  service: '<path d="m14 4 6 6-9 9H5v-6zM12 6l6 6M3 21h18"/>',
+  chart: '<path d="M4 3v18h18M8 16v-4m5 4V8m5 8V5"/>',
+  chat: '<path d="M20 16h-9l-6 4v-4H3V4h17zM7 8h9m-9 4h6"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+};

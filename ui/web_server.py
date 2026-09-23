@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import logging
 from pathlib import Path
@@ -26,6 +27,7 @@ ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/interface.js": ("interface.js", "text/javascript; charset=utf-8"),
     "/map.js": ("map.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
@@ -77,8 +79,26 @@ class Backend:
         baseline = self.baseline(selected_event)
         if baseline.get("valid") is False:
             raise ValueError(" ".join(baseline["errors"]))
+        # Административная карта и учебный датасет имеют разный охват.
+        # Наличие полигона не означает наличие показателей для расчёта Score.
+        modeled = [row["id"] for row in baseline["districts"]]
+        features = (self.geojson or {}).get("features", [])
+        geographic = [f.get("properties", {}).get("id") for f in features]
+        geographic = list(dict.fromkeys(item for item in geographic if item))
+        unmodeled = [item for item in geographic if item not in modeled]
+        sources = list(dict.fromkeys(f.get("properties", {}).get("source_url", "")
+                                    for f in features))
         return {"baseline": baseline, "catalog": self.catalog, "geojson": self.geojson,
-                "events": self.events, "mode": "live"}
+                "events": self.events, "mode": "live",
+                "model_scope": {"district_ids": modeled,
+                    "geographic_district_ids": geographic,
+                    "unmodeled_district_ids": unmodeled,
+                    "notice": "Расчёт использует районы и показатели датасета задания. "
+                              "Районы без исходных показателей показаны на карте без оценки."},
+                "geography": {"sources": [url for url in sources if url],
+                    "has_approximate": any(f.get("properties", {}).get("source") == "fallback_approx"
+                                           for f in features),
+                    "feature_count": len(features), "modeled_count": len(modeled)}}
 
     def plan_status(self, plan, selected_event):
         # simulate возвращает стоимость и бюджет даже у неполного плана.
@@ -217,14 +237,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         # HTML и API на одном origin; сторонние страницы не должны расходовать ключ.
         origin = self.headers.get("Origin")
-        if origin:
-            parsed = urlsplit(origin)
-            if parsed.scheme not in ("http", "https") or parsed.netloc != self.headers.get("Host"):
-                self.error_reply(403, "Откройте интерфейс через адрес этого сервера.")
-                return
+        try:
+            host = urlsplit("http://" + self.headers.get("Host", "")).hostname
+            allowed_host = host in {"localhost", "127.0.0.1", "::1", self.server.server_address[0]}
+            if not allowed_host and self.server.server_address[0] == "0.0.0.0":
+                # При явном сетевом запуске допускаем обращение по адресу машины.
+                allowed_host = ipaddress.ip_address(host).is_private
+            if not allowed_host:
+                raise ValueError("Неизвестный адрес сервера")
+            parsed = urlsplit(origin) if origin else None
+            if parsed and (parsed.scheme not in ("http", "https") or parsed.netloc != self.headers.get("Host")):
+                raise ValueError("Сторонний источник запроса")
+        except ValueError:
+            self.error_reply(403, "Откройте интерфейс через адрес этого сервера.")
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= MAX_BODY:
+                # Небольшое превышение дочитываем перед закрытием соединения:
+                # иначе Windows может послать TCP reset раньше ответа 413.
+                if MAX_BODY < length <= MAX_BODY * 2:
+                    self.rfile.read(length)
                 self.error_reply(413, "Пустой или слишком большой запрос.")
                 return
             if self.headers.get_content_type() != "application/json":

@@ -1,4 +1,9 @@
-"""Числа из ответов движка: ссылки и точно скопированные числовые значения."""
+"""Форматирование источников и отделение комментария LLM от проверенных фактов.
+
+Совпадение числа с evidence не доказывает его район, показатель или сценарий.
+Поэтому публичный ответ советника собирается из готового отчёта движка, а от LLM
+используется только качественный комментарий без числовых утверждений.
+"""
 
 from __future__ import annotations
 
@@ -76,6 +81,39 @@ _SMALL_NUMERALS = {
 
 class EvidenceError(ValueError):
     """Ответ содержит неподтверждённое число или неверную ссылку."""
+
+
+def mentions_saray_shyk(text: str) -> bool:
+    text = text.casefold().replace("қ", "к")
+    return any(name in text for name in ("сарайшык", "sarayshyq", "sarayshyk", "saraishyq", "saraishyk"))
+
+
+def qualitative_comment(draft: str, *, saray_shyk_modeled: bool = False) -> tuple[str, bool]:
+    """Оставляем качественные предложения, количественные заменит отчёт движка.
+
+    Число не переносится под придуманную моделью подпись даже при верном ref.
+    Не пытаемся угадать смысл русского текста регулярными выражениями. При
+    отсутствии комментария вызывающий код вправе сделать одну коррекцию.
+    """
+    if not isinstance(draft, str) or not draft.strip():
+        raise EvidenceError("Пустой комментарий. Кратко объясни последствия без чисел и ссылок.")
+    kept, omitted = [], False
+    for part in re.split(r"(?<=[.!?])\s+|\n+", draft.strip()):
+        if not part.strip():
+            continue
+        numeric = (any(char.isnumeric() for char in part) or NUMBER_WORDS.search(part)
+                   or "{{" in part or "}}" in part)
+        unmodeled = not saray_shyk_modeled and mentions_saray_shyk(part)
+        if numeric or unmodeled:
+            omitted = True
+            continue
+        kept.append(part.strip())
+    comment = "\n".join(kept).strip()
+    if not comment or not re.search(r"[А-Яа-яA-Za-z]{3}", comment):
+        raise EvidenceError("Числовые утверждения показывает готовый отчёт движка. "
+                            "Напиши только краткий качественный комментарий без цифр, числительных, "
+                            "кодов мер, ref и оценок районов без данных.")
+    return comment, omitted
 
 
 def format_value(value: int | float | str) -> str:
@@ -210,6 +248,11 @@ def _check_number_roles(answer: str, evidence: dict, facts: list) -> None:
 
 
 def render_grounded_answer(draft: str, evidence: dict[str, dict]) -> str:
+    """Совместимый форматтер старых ссылок, НЕ проверка смысла фразы LLM.
+
+    Онлайн-советник его не использует: числовые утверждения там создаются
+    детерминированно из результата, вместе с правильной подписью и контекстом.
+    """
     if not isinstance(draft, str) or not draft.strip():
         raise EvidenceError("Пустой ответ советника.")
     prose = REFERENCE.sub("", draft)

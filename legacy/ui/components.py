@@ -12,7 +12,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from ui.engine_adapter import ROOT, EngineAdapter
+from legacy.ui.engine_adapter import ROOT, EngineAdapter
 
 
 LOGGER = logging.getLogger(__name__)

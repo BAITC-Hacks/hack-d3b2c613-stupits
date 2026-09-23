@@ -20,7 +20,7 @@ from agent import advisor
 from agent.evidence import EvidenceError, render_grounded_answer
 from agent.prompts import AUTO_QUESTION
 from agent.tools import EngineTools
-from ui.engine_adapter import EngineAdapter, EngineUnavailable
+from legacy.ui.engine_adapter import EngineAdapter, EngineUnavailable
 
 
 SETTINGS = {"OPENAI_API_KEY": "test-only", "OPENAI_MODEL": "test-model",
@@ -44,7 +44,7 @@ class AdvisorChecks(unittest.TestCase):
         cls.plan = engine.get_data().raw["reference_checks"]["example_valid_set"]["decisions"]
         cls.result = engine.simulate(cls.plan)
 
-    def run_api(self, responder, question="Объясни мой план", *, history=None, checked_plans=None):
+    def run_api(self, responder, question="Объясни мой план", *, history=None, checked_plans=None, event_id=None):
         requests = []
 
         def handler(request):
@@ -64,7 +64,8 @@ class AdvisorChecks(unittest.TestCase):
                         http_client=httpx.Client(transport=httpx.MockTransport(handler)))
         with patch.object(advisor, "read_settings", return_value=SETTINGS), \
              patch.object(advisor, "_create_client", return_value=client):
-            response = advisor.ask_advisor(question, self.result, history=history, checked_plans=checked_plans)
+            response = advisor.ask_advisor(question, self.result, history=history, checked_plans=checked_plans,
+                                           event_id=event_id)
         self.assertTrue(client.is_closed())
         return response, requests
 
@@ -88,6 +89,166 @@ class AdvisorChecks(unittest.TestCase):
         self.assertTrue(response["offline"])
         self.assertEqual(response["reason_code"], "missing_model")
         factory.assert_not_called()
+
+    def test_all_current_scenario_tools_keep_the_selected_event(self):
+        tools = EngineTools(event_id="E2")
+        self.assertEqual(tools.rules["budget"], engine.baseline(event_id="E2")["budget"])
+        requests = [("baseline", {}), ("validate", {"decisions": self.plan}),
+                    ("simulate", {"decisions": self.plan}), ("optimize", {"constraints": {"budget": 80}}),
+                    ("compare", {"plans": {"Текущий": self.plan}})]
+        for name, arguments in requests:
+            actual = tools.call(name, arguments)
+            self.assertEqual(actual["status"], "ok")
+            self.assertEqual(tools.trace[-1]["arguments"]["event_id"], "E2")
+            self.assertNotIn("event_id", arguments)  # Вход модели не мутируется.
+            if name == "simulate":
+                self.assertEqual(actual["result"], engine.simulate(self.plan, event_id="E2"))
+            if name == "compare":
+                self.assertEqual(actual["result"]["ranking"][0]["score"],
+                                 engine.simulate(self.plan, event_id="E2")["score"])
+            if name == "optimize":
+                for plan in actual["result"]["results"]:
+                    self.assertEqual(plan["score"], engine.simulate(plan["decisions"], event_id="E2")["score"])
+        self.assertTrue(all(plan["event_id"] == "E2" for plan in tools.checked_plans()))
+
+    def test_advisor_infers_event_and_ignores_stale_supplied_score(self):
+        event_result = engine.simulate(self.plan, event_id="E2")
+        event_result["score"] = 999999  # Ответ обязан заново прийти из движка.
+
+        def responder(payload, turn):
+            if turn == 1:
+                context = json.loads(payload["messages"][-1]["content"])
+                self.assertEqual(context["selected_event_id"], "E2")
+                return tool_message("baseline", {})
+            return text_message("Score {{e1:/score}}; база {{e2:/score}}.")
+
+        with patch.object(self, "result", event_result):
+            response, requests = self.run_api(responder)
+        self.assertFalse(response["offline"])
+        self.assertEqual(response["event_id"], "E2")
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(all(call["arguments"]["event_id"] == "E2" for call in response["tool_calls"]))
+        self.assertNotIn("999999", response["answer"])
+        self.assertIn("Сильный буран", response["answer"])
+
+    def test_remaining_event_risks_use_current_plan_even_if_model_requests_baseline(self):
+        plan = engine.optimize(top_n=1)["results"][0]["decisions"]
+        current = engine.simulate(plan, event_id="E1")
+        self.assertEqual(current["N_crit"], 1)
+        self.assertEqual(current["baseline"]["N_crit"], 3)
+
+        def responder(payload, turn):
+            if turn == 1:
+                self.assertEqual(payload["tool_choice"]["function"]["name"], "simulate")
+                # Провайдер игнорирует forced choice: не должны принять базу
+                # за оставшиеся после проектов критические показатели.
+                return tool_message("baseline", {})
+            facts = json.loads(next(m["content"] for m in reversed(payload["messages"]) if m["role"] == "tool"))
+            self.assertEqual(facts["executed_tool"], "simulate")
+            self.assertEqual(facts["analysis_scope"], "current_plan_after_measures")
+            self.assertEqual(facts["facts"]["N_crit"]["value"], 1)
+            critical = facts["facts"]["critical_indicators"]
+            self.assertEqual(len(critical), 1)
+            self.assertEqual(critical[0]["district"], "almaty")
+            self.assertEqual(critical[0]["value"]["value"], 39.38)
+            self.assertIn("ПОСЛЕ", facts["instruction"])
+            return text_message("Осталось критических показателей: {{e2:/N_crit}}. "
+                                "ЖКХ Алматы — {{e2:/critical_indicators/0/value}}. "
+                                "Слабейший район — Нура, D {{e2:/min_district/D}}.")
+
+        with patch.object(self, "result", current):
+            response, requests = self.run_api(responder, "Какие риски остались после события?")
+        self.assertFalse(response["offline"])
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(response["tool_calls"][-1]["name"], "simulate")
+        self.assertEqual(response["tool_calls"][-1]["requested_name"], "baseline")
+        self.assertEqual(response["tool_calls"][-1]["arguments"], {"decisions": plan, "event_id": "E1"})
+        self.assertIn("39,38", response["answer"])
+        self.assertIn("54,09", response["answer"])
+        self.assertNotIn("49,18", response["answer"])
+
+    def test_nura_baseline_question_is_not_rerouted_to_current_risks(self):
+        def responder(payload, turn):
+            if turn == 1:
+                self.assertEqual(payload["tool_choice"], "required")
+                return tool_message("baseline", {})
+            return text_message("До проектов оценка Нуры — {{e2:/min_district/D}}.")
+
+        response, _ = self.run_api(responder, "Почему Нура так важна?")
+        self.assertFalse(response["offline"])
+        self.assertEqual(response["tool_calls"][-1]["name"], "baseline")
+        self.assertFalse(advisor._current_plan_risks("Какие критические показатели были до проектов?"))
+
+    def test_explicit_event_overrides_inferred_context_and_offline_keeps_it(self):
+        supplied = engine.simulate(self.plan, event_id="E2")
+        with patch.object(advisor, "read_settings", return_value=EMPTY_SETTINGS), \
+             patch.object(advisor, "_create_client") as factory:
+            response = advisor.ask_advisor(AUTO_QUESTION, supplied, event_id="E5")
+        factory.assert_not_called()
+        expected = engine.simulate(self.plan, event_id="E5")
+        self.assertEqual(response["event_id"], "E5")
+        self.assertEqual(response["tool_calls"][0]["result"]["score"], expected["score"])
+        self.assertIn("Вспышка смога", response["answer"])
+        self.assertIn(str(expected["score"]).replace(".", ","), response["answer"])
+        self.assertEqual(supplied["event"]["id"], "E2")
+
+    def test_budget_cut_limits_rules_and_fallback_search_to_event_budget(self):
+        plan = engine.optimize(top_n=1, constraints={"budget": 80})["results"][0]["decisions"]
+        supplied = engine.simulate(plan, event_id="E6")
+        with patch.object(advisor, "read_settings", return_value=EMPTY_SETTINGS):
+            response = advisor.ask_advisor("Предложи бюджет 100", supplied)
+        self.assertEqual(response["event_id"], "E6")
+        self.assertIn("не выше 85", response["answer"])
+        searched = next(call for call in response["tool_calls"] if call["name"] == "optimize")
+        self.assertEqual(searched["arguments"]["event_id"], "E6")
+        self.assertEqual(searched["result"]["constraints"]["budget"], 85)
+        self.assertTrue(all(plan["cost"] <= 85 for plan in searched["result"]["plans"]))
+        self.assertTrue(all(plan["event_id"] == "E6" for plan in response["checked_plans"]))
+
+    def test_budget_cut_invalidates_expensive_plan_without_api(self):
+        with patch.object(advisor, "_create_client") as factory:
+            response = advisor.ask_advisor(AUTO_QUESTION, self.result, event_id="E6")
+        factory.assert_not_called()
+        self.assertEqual(response["reason_code"], "invalid_plan")
+        self.assertIn("85", response["answer"])
+        self.assertIn("95", response["answer"])
+        self.assertEqual(response["tool_calls"][0]["status"], "invalid")
+        self.assertEqual(response["tool_calls"][0]["arguments"]["event_id"], "E6")
+
+    def test_model_cannot_override_the_event(self):
+        tools = EngineTools(event_id="E6")
+        with patch.object(tools.engine, "simulate") as simulate:
+            response = tools.call("simulate", {"decisions": self.plan, "event_id": None})
+        simulate.assert_not_called()
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(tools.event_id, "E6")
+
+    def test_event_catalogue_and_robustness_are_explicitly_before_events(self):
+        from agent.evidence import REFERENCE, resolve_pointer
+        from agent.offline import offline_response
+
+        tools = EngineTools(event_id="E2")
+        for name, arguments, expected, scope in (
+            ("list_events", {}, engine.list_events(), "event_catalogue"),
+            ("robustness", {"decisions": self.plan}, engine.robustness(self.plan), "before_events"),
+        ):
+            response = tools.call(name, arguments)
+            self.assertEqual(response["result"], expected)  # E2 не наложено повторно.
+            self.assertNotIn("event_id", tools.trace[-1]["arguments"])
+            payload = tools.model_payload(response["evidence_id"])
+            self.assertEqual(payload["context"], {"event_id": "E2", "scope": scope})
+            for match in REFERENCE.finditer(json.dumps(payload)):
+                self.assertIsNotNone(resolve_pointer(tools.evidence[match[1]], match[2]))
+            offline = offline_response(engine.simulate(self.plan, event_id="E2"),
+                                       trace=tools.trace, evidence=tools.evidence)
+            self.assertIn("обычного базиса", offline["answer"])
+        self.assertIn("Устойчивость плана до событий", offline["answer"])
+
+    def test_checked_plans_do_not_leak_between_event_contexts(self):
+        plans = [{"decisions": self.plan}, {"decisions": self.plan, "event_id": "E2"},
+                 {"decisions": self.plan, "event_id": "E6"}]
+        self.assertEqual([p.get("event_id") for p in advisor._checked(plans, "E2")], ["E2"])
+        self.assertEqual([p.get("event_id") for p in advisor._checked(plans)], [None])
 
     def test_constrained_search_answers_after_first_successful_tool(self):
         constraints = {"exclude": ["M3"], "include": [{"measure": "M7", "district": "nura"}], "budget": 80}
@@ -328,7 +489,7 @@ class AdvisorChecks(unittest.TestCase):
         self.assertEqual(render_grounded_answer(negative["ref"], tools.evidence), "-1,75")
 
     def test_conversation_keeps_checked_plan_after_more_than_six_plain_messages(self):
-        from ui import advisor_panel
+        from legacy.ui import advisor_panel
 
         constraints = {"exclude": ["M3"], "budget": 72}
         chosen = engine.optimize(top_n=1, constraints=constraints)["results"][0]["decisions"]
@@ -407,7 +568,7 @@ class AdvisorChecks(unittest.TestCase):
                 "result": {"score": result["score"]}, "summary": "Результат проверен.", "source": "model", "status": "ok"}])
             response["checked_plans"] = deepcopy(checked)
             return response
-        app = AppTest.from_file(str(advisor.ROOT / "app.py"), default_timeout=30)
+        app = AppTest.from_file(str(advisor.ROOT / "legacy" / "app.py"), default_timeout=30)
         app.session_state["decisions"] = deepcopy(self.plan)
         with patch.object(advisor, "ask_advisor", side_effect=fake_advisor):
             app.run()

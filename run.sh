@@ -78,10 +78,11 @@ else
     echo "[3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указан ключ OPENAI_API_KEY."
 fi
 
-# 4. Python-сервер отдаёт HTML-интерфейс и API. Флаг --open открывает браузер.
+# 4. app.py запускает Python-сервер (ui/web_server.py): HTML-интерфейс и API. Флаг --open открывает браузер.
 echo "[4/4] Запускаю приложение: $URL   (остановить — Ctrl+C)"
 BROWSER_ARGS=()
 if [ -z "${NO_BROWSER:-}" ]; then
     BROWSER_ARGS=(--open)
 fi
-exec "$VENV_PY" -B app.py --host 127.0.0.1 --port "$PORT" "${BROWSER_ARGS[@]}"
+# ${arr[@]+...} — пустой массив не ломает set -u в bash 3.2 (macOS)
+exec "$VENV_PY" -B app.py --host 127.0.0.1 --port "$PORT" ${BROWSER_ARGS[@]+"${BROWSER_ARGS[@]}"}

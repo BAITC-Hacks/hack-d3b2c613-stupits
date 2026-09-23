@@ -7,6 +7,8 @@ from agent.evidence import format_value
 
 def offline_analysis(result: dict) -> str:
     if not isinstance(result, dict) or result.get("valid") is False or result.get("score") is None:
+        if isinstance(result, dict) and result.get("errors"):
+            return "**План не прошёл проверку.** " + " ".join(map(str, result["errors"]))
         return "Сначала рассчитайте допустимый план. Без результата движка советник не может назвать оценку."
 
     def value(item):
@@ -170,6 +172,32 @@ def _baseline_analysis(baseline: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _extra_analysis(name: str, result: dict) -> str:
+    """Готовые сравнения и риски сохраняются даже при недоступном API."""
+    if result.get("errors"):
+        return "**Проверка не выполнена.** " + " ".join(map(str, result["errors"]))
+    if name == "robustness":
+        parts = ["**Устойчивость плана до событий.** Каждый сценарий проверен от обычного базиса; "
+                 "события не накладываются друг на друга."]
+        if result.get("score") is not None:
+            parts.append("Score до событий — " + format_value(result["score"]) + ".")
+        if result.get("summary"):
+            parts.append(str(result["summary"]))
+        return "\n\n".join(parts)
+    if name == "compare":
+        return "**Сравнение планов в выбранных условиях.**\n\n" + "\n".join(
+            "- " + str(item) for item in result.get("summary", []))
+    rows = []
+    for event in result.get("events", []):
+        row = f"- {event['id']} — {event['name']}"
+        if event.get("baseline_score") is not None:
+            row += f"; Score города без проектов — {format_value(event['baseline_score'])}"
+        if event.get("budget") is not None:
+            row += f"; бюджет — {format_value(event['budget'])} у.е."
+        rows.append(row + ".")
+    return "**Каталог отдельных событий от обычного базиса.**\n\n" + "\n".join(rows)
+
+
 def _contextual_analysis(result: dict, trace: list, evidence: dict, *, auto: bool,
                          current_decisions: list) -> str:
     # В журнале UI результат сокращён. Предпочитаем полный ответ движка по evidence_id.
@@ -199,10 +227,12 @@ def _contextual_analysis(result: dict, trace: list, evidence: dict, *, auto: boo
     # Последний относящийся к вопросу результат важнее общего шаблона текущего плана.
     for call, raw in reversed(calls):
         name = call.get("name")
-        if name not in {"optimize", "simulate", "validate"}:
+        if name not in {"optimize", "simulate", "validate", "robustness", "compare", "list_events"}:
             continue
         if call.get("status") == "error":
             continue
+        if name in {"robustness", "compare", "list_events"}:
+            return _extra_analysis(name, raw)
         if name == "optimize":
             return _search_analysis(raw, result, current_decisions, auto=False)
         if raw.get("valid") is False or raw.get("errors"):
@@ -241,5 +271,8 @@ def offline_response(result: dict, *, trace: list | None = None, reason: str = "
             answer = "В результате движка недостаточно данных для разбора. Повторите расчёт плана."
     if rule_notice:
         answer = rule_notice + "\n\n" + answer
+    event = result.get("event") if isinstance(result, dict) else None
+    if isinstance(event, dict) and event.get("name"):
+        answer = f"Условия сценария: «{event['name']}».\n\n" + answer
     return {"answer": answer, "tool_calls": trace or [], "offline": True,
             "notice": "Советник работает в офлайн-режиме.", "reason": reason}

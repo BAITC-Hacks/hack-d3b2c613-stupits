@@ -62,7 +62,7 @@ if exist ".env" (
     echo [3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указан ключ OPENAI_API_KEY.
 )
 
-rem 4. Python-сервер отдаёт HTML-интерфейс и API. Флаг --open открывает браузер.
+rem 4. app.py запускает Python-сервер (ui\web_server.py): HTML-интерфейс и API. Флаг --open открывает браузер.
 echo [4/4] Запускаю приложение: %URL%   остановить — Ctrl+C
 set "OPEN_BROWSER="
 if not defined NO_BROWSER set "OPEN_BROWSER=--open"
