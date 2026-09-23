@@ -207,6 +207,16 @@ class Handler(BaseHTTPRequestHandler):
     def error_reply(self, status, message):
         self.json_reply(status, {"valid": False, "errors": [message], "score": None})
 
+    def discard_body(self):
+        # Непрочитанное тело при закрытии сокета заставляет Windows послать
+        # TCP reset раньше ответа об ошибке. Дочитываем только допустимый размер.
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return
+        if 0 < length <= MAX_BODY:
+            self.rfile.read(length)
+
     def do_HEAD(self):
         self.do_GET()
 
@@ -242,6 +252,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlsplit(self.path).path
         if path not in POST_ROUTES:
+            self.discard_body()
             self.error_reply(404, "Метод не найден.")
             return
         # HTML и API на одном origin; сторонние страницы не должны расходовать ключ.
@@ -258,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed and (parsed.scheme not in ("http", "https") or parsed.netloc != self.headers.get("Host")):
                 raise ValueError("Сторонний источник запроса")
         except ValueError:
+            self.discard_body()
             self.error_reply(403, "Откройте интерфейс через адрес этого сервера.")
             return
         try:
@@ -270,6 +282,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.error_reply(413, "Пустой или слишком большой запрос.")
                 return
             if self.headers.get_content_type() != "application/json":
+                self.discard_body()
                 self.error_reply(415, "Ожидается Content-Type: application/json.")
                 return
             body = json.loads(self.rfile.read(length).decode("utf-8-sig"), parse_constant=_invalid_number)
