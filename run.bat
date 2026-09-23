@@ -59,14 +59,14 @@ if exist ".env" (
     echo [3/4] Файл .env уже есть.
 ) else (
     copy /y .env.example .env >nul
-    echo [3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указаны ключ и модель.
+    echo [3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указан ключ OPENAI_API_KEY.
 )
 
-rem 4. Запуск. Браузер открываем сами, когда сервер ответит: в режиме headless
-rem    Streamlit не спрашивает e-mail при первом запуске и не зависает на вводе.
+rem 4. Python-сервер отдаёт HTML-интерфейс и API. Флаг --open открывает браузер.
 echo [4/4] Запускаю приложение: %URL%   остановить — Ctrl+C
-if not defined NO_BROWSER start "" /b powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; for($i=0;$i -lt 120;$i++){try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 '%URL%/_stcore/health'|Out-Null; Start-Process '%URL%'; break}catch{Start-Sleep -Seconds 1}}"
-"%VENV_PY%" -m streamlit run app.py --server.port %PORT% --server.headless true --browser.gatherUsageStats false
+set "OPEN_BROWSER="
+if not defined NO_BROWSER set "OPEN_BROWSER=--open"
+"%VENV_PY%" -B app.py --host 127.0.0.1 --port "%PORT%" %OPEN_BROWSER%
 exit /b %errorlevel%
 
 rem Подходящий Python: переменная PYTHON, затем py-лаунчер 3.13/3.12/3.11/3.14, затем python из PATH

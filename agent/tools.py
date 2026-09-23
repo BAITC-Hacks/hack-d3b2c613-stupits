@@ -38,6 +38,19 @@ SCHEMAS = {
                  "и при необходимости районы; budget ограничивает бюджет. Передай {} без ограничений.",
                  {"type": "object", "properties": {"constraints": CONSTRAINTS},
                   "required": ["constraints"], "additionalProperties": False}),
+    "list_events": ("Каталог отдельных городских событий от обычного базиса до событий; не меняет выбранное событие.",
+                    {"type": "object", "properties": {}, "additionalProperties": False}),
+    "robustness": ("Проверить план до событий: движок прогоняет его по отдельным событиям от обычного базиса. "
+                   "Показывает худший случай и бюджетные риски, не накладывает события друг на друга.",
+                   {"type": "object", "properties": {
+                       "decisions": DECISIONS["properties"]["decisions"],
+                       "events": {"type": ["array", "null"], "items": {"type": "string"}, "maxItems": 30}},
+                    "required": ["decisions"], "additionalProperties": False}),
+    "compare": ("Сравнить названные планы в выбранных условиях: рейтинг, оценки и отличия составов.",
+                {"type": "object", "properties": {"plans": {
+                    "type": "object", "minProperties": 1, "maxProperties": 6,
+                    "additionalProperties": DECISIONS["properties"]["decisions"]}},
+                 "required": ["plans"], "additionalProperties": False}),
 }
 TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": name, "description": description, "parameters": schema}}
@@ -61,6 +74,14 @@ def summarize(name: str, result: dict) -> tuple[str, dict]:
                    "plans": [{key: plan[key] for key in ("score", "cost", "decisions") if key in plan}
                              for plan in result.get("results", [])]}
         return result.get("message") or "Поиск завершён.", compact
+    if name in {"robustness", "compare", "list_events"}:
+        compact = {key: deepcopy(result[key]) for key in (
+            "score", "cost", "worst_score", "worst_case", "fails_under", "summary", "count", "baseline_score",
+            "leader", "ranking", "events") if key in result}
+        summary = result.get("summary")
+        if isinstance(summary, list):
+            summary = " ".join(map(str, summary))
+        return summary or ("Каталог событий получен." if name == "list_events" else "Сравнение выполнено."), compact
     compact = {key: deepcopy(result[key]) for key in
                ("score", "delta", "cost", "budget_left", "N_crit", "min_district") if key in result}
     parts = []
@@ -72,14 +93,20 @@ def summarize(name: str, result: dict) -> tuple[str, dict]:
 
 
 class EngineTools:
-    def __init__(self) -> None:
+    def __init__(self, event_id: str | None = None) -> None:
         self.engine = importlib.import_module("engine")
         self.trace: list[dict] = []
-        data = self.engine.get_data()
+        self.event_id = str(event_id).strip().upper() if event_id else None
+        self.data = data = self.engine.get_data()
+        # Контекст закрепляется приложением. Ни schema, ни arguments модели не
+        # позволяют снять событие и вернуть бюджет обычного города.
+        self.context = self.engine.baseline(data=data, event_id=self.event_id) if self.event_id else None
         # Правила — тоже факты движка, а не числа из памяти LLM.
-        self.rules = {"budget": data.budget, "num_decisions": data.num_decisions,
+        self.rules = {"budget": (self.context or {}).get("budget", data.budget), "num_decisions": data.num_decisions,
                       "max_per_direction": data.max_per_direction, "crit_threshold": data.crit_threshold,
                       "score_formula": deepcopy(data.raw["score_formula"])}
+        if self.context and self.context.get("event"):
+            self.rules["event"] = deepcopy(self.context["event"])
         self.evidence: dict[str, dict] = {"e0": deepcopy(self.rules)}
 
     @property
@@ -88,7 +115,7 @@ class EngineTools:
 
     def catalogue(self) -> list[dict]:
         # Только справочник названий/id для составления аргументов, без чисел модели.
-        data = self.engine.get_data()
+        data = self.data
         return [{"measure": mid, "name": measure["name"], "scope": measure["scope"]}
                 for mid, measure in data.measures.items()]
 
@@ -101,18 +128,45 @@ class EngineTools:
         raw = self.evidence[evidence_id]
         if evidence_id == "e0" or raw.get("errors"):
             selected = deepcopy(raw)
+        elif "ranking" in raw:
+            selected = {key: deepcopy(raw[key]) for key in ("event", "baseline_score", "leader", "summary", "errors") if key in raw}
+            selected["ranking"] = [{key: deepcopy(row[key]) for key in (
+                "name", "rank", "valid", "errors", "score", "delta_vs_baseline", "cost", "budget_left",
+                "N_crit", "min_district", "decisions", "gap_to_leader", "differs_from_leader") if key in row}
+                for row in raw["ranking"][:3]]
+        elif "events" in raw:
+            selected = {key: deepcopy(raw[key]) for key in (
+                "valid", "errors", "count", "score", "baseline_score", "budget", "cost", "worst_case",
+                "worst_score", "fails_under", "average_drop", "summary") if key in raw}
+            selected["events"] = [{key: deepcopy(row[key]) for key in (
+                "id", "event", "name", "district_name", "effects", "budget", "budget_change", "valid",
+                "errors", "score", "baseline_score", "baseline_delta", "drop", "plan_gain", "hardest_hit") if key in row}
+                for row in raw["events"]]
         elif "results" in raw:
-            selected = {key: deepcopy(raw[key]) for key in ("constraints", "message", "errors") if key in raw}
+            selected = {key: deepcopy(raw[key]) for key in ("event", "constraints", "message", "errors") if key in raw}
             selected["results"] = [{key: deepcopy(plan[key]) for key in
                 ("score", "score_delta", "cost", "budget_left", "decisions", "min_district", "N_crit")
                 if key in plan} for plan in raw["results"][:2]]
         else:
             selected = {key: deepcopy(raw[key]) for key in
-                ("valid", "errors", "score", "cost", "budget", "budget_left", "N_crit", "min_district", "delta")
+                ("event", "valid", "errors", "score", "cost", "budget", "budget_left", "N_crit", "min_district", "delta")
                 if key in raw}
             if "baseline" in raw:
                 selected["baseline"] = {key: raw["baseline"][key] for key in ("score", "N_crit")
                                         if key in raw["baseline"]}
+            # Авторазбору нужны реальные сильные стороны и побочные эффекты даже
+            # без повторного simulate; это компактнее полной таблицы показателей.
+            for key in ("critical_resolved", "critical_new", "synergies"):
+                if key in raw:
+                    selected[key] = deepcopy(raw[key])
+            if brief and any(any(value < 0 for value in measure.get("effects_realized", {}).values())
+                             for measure in raw.get("measures", [])):
+                # Пустые записи сохраняют реальные индексы JSON Pointer. Даже
+                # короткий контекст обязан показывать побочные эффекты текущего плана.
+                selected["measures"] = [
+                    {key: deepcopy(m[key]) for key in ("measure", "name", "district_name", "effects_realized")
+                     if key in m} if any(v < 0 for v in m.get("effects_realized", {}).values()) else {}
+                    for m in raw["measures"]]
             if not brief:
                 for key in ("critical_resolved", "critical_indicators", "critical_new", "synergies"):
                     if key in raw:
@@ -135,7 +189,9 @@ class EngineTools:
                 return {"value": value, "ref": "{{" + evidence_id + ":" + path + "}}"}
             return value
 
-        return {"evidence_id": evidence_id, "facts": referenced(selected)}
+        call = next((row for row in self.trace if row["evidence_id"] == evidence_id), {})
+        return {"evidence_id": evidence_id, "facts": referenced(selected),
+                "context": {"event_id": self.event_id, "scope": call.get("scope", "selected_conditions")}}
 
     def checked_plans(self) -> list[dict]:
         """Для следующей реплики сохраняем состав и ограничения, не верим старым Score."""
@@ -145,10 +201,18 @@ class EngineTools:
                 continue
             raw = self.evidence.get(call["evidence_id"], {})
             if call["name"] == "optimize" and raw.get("results"):
-                plans.append({"decisions": deepcopy(raw["results"][0]["decisions"]),
+                index = call.get("recommended_index", 0)
+                plans.append({"decisions": deepcopy(raw["results"][index]["decisions"]),
                               "constraints": deepcopy(call["arguments"].get("constraints", {}))})
             elif call["name"] == "simulate" and raw.get("valid"):
                 plans.append({"decisions": deepcopy(call["arguments"]["decisions"]), "constraints": {}})
+            elif call["name"] == "compare":
+                leader = next((row for row in raw.get("ranking", []) if row.get("valid")), None)
+                if leader:
+                    plans.append({"decisions": deepcopy(leader["decisions"]), "constraints": {}})
+        if self.event_id:
+            for plan in plans:
+                plan["event_id"] = self.event_id
         return plans[-6:]
 
     def call(self, name: str, arguments, *, source: str = "model") -> dict:
@@ -156,6 +220,8 @@ class EngineTools:
             raise ToolLimitError("Лимит обращений к движку исчерпан.")
         evidence_id = f"e{len(self.trace) + 1}"
         status = "ok"
+        actual_arguments = deepcopy(arguments)
+        scope = {"robustness": "before_events", "list_events": "event_catalogue"}.get(name, "selected_conditions")
         try:
             from jsonschema import Draft7Validator
 
@@ -164,13 +230,21 @@ class EngineTools:
             # Проверяем форму аргументов, а правила игры проверяет только движок.
             if not Draft7Validator(SCHEMAS[name][1]).is_valid(arguments):
                 raise ValueError("Аргументы не соответствуют схеме")
+            context = {"event_id": self.event_id} if self.event_id else {}
+            if name in {"baseline", "validate", "simulate", "optimize", "compare"}:
+                actual_arguments.update(context)
             functions = {
-                "baseline": self.engine.baseline,
-                "validate": self.engine.validate,
-                "simulate": self.engine.simulate,
-                "optimize": lambda constraints: self.engine.optimize(top_n=5, constraints=constraints),
+                "baseline": lambda **kw: self.engine.baseline(data=self.data, **kw),
+                "validate": lambda **kw: self.engine.validate(data=self.data, **kw),
+                "simulate": lambda **kw: self.engine.simulate(data=self.data, **kw),
+                "optimize": lambda **kw: self.engine.optimize(top_n=5, data=self.data, **kw),
+                "compare": lambda **kw: self.engine.compare(data=self.data, **kw),
+                # Эти две операции по смыслу движка всегда относятся к городу ДО
+                # событий. Выбранное событие сюда не накладываем и не меняем.
+                "list_events": lambda: self.engine.list_events(data=self.data),
+                "robustness": lambda **kw: self.engine.robustness(data=self.data, **kw),
             }
-            result = functions[name](**deepcopy(arguments))
+            result = functions[name](**actual_arguments)
             if not isinstance(result, dict):
                 raise TypeError("Ожидался словарь результата")
             self.evidence[evidence_id] = deepcopy(result)
@@ -184,7 +258,7 @@ class EngineTools:
             self.evidence.pop(evidence_id, None)
             result = {"errors": ["Не удалось выполнить инструмент. Проверьте его имя и формат аргументов."]}
             summary, compact = result["errors"][0], result
-        self.trace.append({"name": name, "arguments": deepcopy(arguments), "result": compact,
+        self.trace.append({"name": name, "arguments": actual_arguments, "result": compact,
                            "summary": summary, "status": status, "source": source,
-                           "evidence_id": evidence_id})
+                           "evidence_id": evidence_id, "scope": scope, "context_event_id": self.event_id})
         return {"evidence_id": evidence_id, "result": result, "status": status}

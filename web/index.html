@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f7f8f4">
+<title>Аким на 5 часов · Астана</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.2/dist/maplibre-gl.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="map" aria-label="Интерактивная карта районов Астаны"></div><div class="map-vignette"></div>
+<header class="topbar">
+ <div class="brand"><div class="brand-mark" data-icon="city"></div><div><div class="brand-title">Аким на 5 часов<span style="color:#7e9b68">.</span></div><div class="brand-sub">Город меняется с ваших решений</div></div></div>
+ <div class="top-center"><b>Астана <span style="color:#c1cbba;margin:0 7px">/</span> Городская лаборатория</b><span><span id="city-summary">Загружаем данные города</span></span></div>
+ <div id="connection" class="connection offline"><i class="dot"></i><span>Подключение…</span></div>
+ <div class="top-actions"><button id="events-button" class="btn"><span data-icon="bolt"></span>Событие</button><button id="tour-button" class="btn dark"><span data-icon="play"></span>Демо-сценарий</button></div>
+</header>
+<aside class="sidebar" aria-label="Управление городом">
+ <div class="score-block"><div class="score-top"><span class="eyebrow">Качество жизни · Astana</span><span id="score-mode" class="live-tag">ИСХОДНОЕ</span></div><div class="score-value-line"><strong class="score-value" id="city-score">—</strong><span id="score-delta" class="score-delta hidden"></span><div class="score-spark" aria-hidden="true"><i style="height:7px"></i><i style="height:10px"></i><i style="height:9px"></i><i style="height:15px"></i><i style="height:17px"></i><i style="height:22px"></i></div></div><div id="score-caption" class="score-caption">Каждый район важен. Начните с самого уязвимого.</div></div>
+ <nav class="tabs" aria-label="Разделы"><button class="tab active" data-tab="overview">Город</button><button class="tab" data-tab="projects">Проекты <span class="tab-count">—</span></button><button class="tab" data-tab="results">Результат</button></nav>
+ <div class="panel-scroll" id="panel-scroll"><div id="panel" class="panel-page"></div></div>
+ <div class="budget-box"><div class="budget-label"><span class="muted">Остаток бюджета</span><strong id="budget-left">—</strong></div><div class="budget-track"><i id="budget-bar" style="width:100%"></i></div><button id="calculate-button" class="btn primary" disabled>Выберите проекты <span data-icon="arrow"></span></button><div class="budget-note" id="budget-note">Ожидаем ответ движка</div></div>
+</aside>
+<div class="map-top"><div class="map-label"><div class="row between"><b>Оценка района, D</b><span class="small muted" id="map-phase">До</span></div><div class="legend"></div><div class="legend-numbers"><span>0 · низкая</span><span>50</span><span>100 · высокая</span></div></div><div class="compare" aria-label="Состояние карты"><button id="show-before" class="active" aria-pressed="true">Было</button><button id="show-after" disabled aria-pressed="false">Стало</button></div></div>
+<div class="map-tools"><button class="icon-btn" id="overview-map" title="Вся Астана" aria-label="Показать всю Астану" data-icon="locate"></button><button class="icon-btn" id="zoom-in" title="Приблизить" aria-label="Приблизить" data-icon="plus"></button><button class="icon-btn" id="zoom-out" title="Отдалить" aria-label="Отдалить" data-icon="minus"></button><button class="icon-btn three-d" id="toggle-3d" title="Наклон и объёмные здания" aria-pressed="false">3D</button><button class="icon-btn" id="rotate-map" title="Повернуть камеру" aria-label="Повернуть камеру" data-icon="rotate"></button></div>
+<div id="map-status" class="map-status">Загружаем карту Астаны…</div><div id="event-banner" class="event-banner hidden"></div>
+<div class="map-hint" id="map-hint">Нажмите на район, чтобы начать · колесо — масштаб · правая кнопка — вращение</div>
+<div class="map-footer">Учебная модель</div><section id="map-fallback" class="map-fallback hidden" aria-label="Районы без карты"></section>
+<section class="plan-ribbon" aria-label="Выбранные проекты"><div class="ribbon-head"><div class="ribbon-title">Ваш план <span id="plan-count" class="pill">—</span><span class="muted small" id="plan-cost">Начните с одного решения</span></div><button id="clear-plan">Очистить</button></div><div id="plan-slots" class="plan-slots"></div></section>
+<section id="advisor-card" class="advisor-card hidden" aria-label="Краткий разбор"></section>
+<section id="drawer" class="drawer hidden" aria-label="Дополнительная панель"></section>
+<div id="tour" class="demo-step hidden"></div><div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<script defer src="/app.js"></script>
+<script defer src="/map.js"></script>
+</body>
+</html>

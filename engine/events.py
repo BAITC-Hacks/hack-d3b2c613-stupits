@@ -64,10 +64,14 @@ def resolve_events(data: CityData, event_ids=None) -> tuple[list, list]:
         return ids, ([] if ids else ["Событий нет: не найден файл data/events.json."])
     if isinstance(event_ids, str):
         event_ids = [event_ids]
+    if not isinstance(event_ids, (list, tuple)):
+        return [], [f'Список событий должен быть списком id, например ["E1", "E2"]; получено: {event_ids!r}.']
     ids, errors = [], []
     for raw in event_ids:
-        event_id = str(raw).strip().upper()
-        if event_id not in data.events:
+        event_id = raw.strip().upper() if isinstance(raw, str) else None
+        if event_id is None:
+            errors.append(f'Событие {raw!r} должно быть строкой с id, например "E2".')
+        elif event_id not in data.events:
             errors.append(f"Неизвестное событие «{raw}». Доступные события: {', '.join(data.events)}.")
         elif event_id not in ids:
             ids.append(event_id)

@@ -22,6 +22,8 @@ C(14, 5) = 2002 набора мер и ≈1.4 млн вариантов вмес
 
 from __future__ import annotations
 
+import math
+import numbers
 import time
 from collections import Counter
 from itertools import combinations
@@ -34,6 +36,7 @@ from .events import resolve_events, with_event
 from .model import evaluate, score_parts
 from .report import event_report, min_district, placement_label, plural, r2, synergy_list
 from .robustness import event_outcome, worst_outcome
+from .validation import check_decisions
 
 
 def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | None = None,
@@ -65,7 +68,9 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
     if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
         errors.append("top_n должен быть целым числом не меньше 1.")
     robust_ids = []
-    if robust and event_id is not None:
+    if not isinstance(robust, bool):
+        errors.append(f"robust должен быть true или false, а не {robust!r}.")
+    elif robust and event_id is not None:
         errors.append("Режим robust ищет план, устойчивый ко всем событиям сразу, — event_id с ним не задаётся.")
     elif robust:
         robust_ids, robust_errors = resolve_events(data, robust_events)
@@ -75,6 +80,15 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
         "include": [{"measure": m, "district": d} for m, d in include.items()],
         "budget": budget,
     }
+
+    # Стартовые точки: bases[0] — без события (или после события event_id),
+    # остальные — после каждого события режима robust.
+    shocked = [with_event(data, e)[0] for e in robust_ids]
+    bases = [data.base] + [s.base for s in shocked]
+    if robust:  # план должен уложиться в бюджет при любом событии (например, при секвестре)
+        budget = min([budget] + [s.budget for s in shocked])
+    if not errors:
+        errors += _include_conflicts(data, include, budget)
     if errors:
         return {
             "results": [],
@@ -83,13 +97,6 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
             "constraints": used_constraints,
             "stats": None,
         }
-
-    # Стартовые точки: bases[0] — без события (или после события event_id),
-    # остальные — после каждого события режима robust.
-    shocked = [with_event(data, e)[0] for e in robust_ids]
-    bases = [data.base] + [s.base for s in shocked]
-    if robust:  # план должен уложиться в бюджет при любом событии (например, при секвестре)
-        budget = min([budget] + [s.budget for s in shocked])
 
     stats = Counter()
     candidates = []  # (цель, Score, стоимость, набор мер, районные меры набора, районы)
@@ -122,18 +129,29 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
     candidates.sort(key=lambda c: (-round(c[0], 9), -round(c[1], 9), c[2], c[3], c[5]))
 
     base_score = evaluate(data, []).score
-    results = []
-    for rank, (_, _, cost, combo, district_measures, where) in enumerate(candidates[:top_n], start=1):
+    results, rejected = [], 0
+    for _, _, cost, combo, district_measures, where in candidates:
+        if len(results) == top_n:
+            break
         district_of = {m: data.district_ids[i] for m, i in zip(district_measures, where)}
         placements = [(m, district_of.get(m)) for m in combo]
+        decisions = [{"measure": m, "district": d} for m, d in placements]
         ev = evaluate(data, placements)  # тот же расчёт, что и в simulate()
+        worst = _worst_case(data, placements, ev, robust_ids) if robust else None
+        # Страховка: каждый план перед выдачей проходит тот же validate(), что и ручной ввод,
+        # и проверку ограничений. Перебор и так отсекает запрещённое правилами — это защита
+        # от ошибки в быстрых проверках: невалидный план не может попасть в выдачу.
+        if (check_decisions(decisions, data)[1] or _breaks_constraints(decisions, exclude, include, budget, data)
+                or (robust and worst["score"] is None)):
+            rejected += 1
+            continue
         result = {
-            "rank": rank,
+            "rank": len(results) + 1,
             "score": r2(ev.score),
             "score_delta": r2(ev.score - base_score),
             "cost": cost,
             "budget_left": data.budget - cost,
-            "decisions": [{"measure": m, "district": d} for m, d in placements],
+            "decisions": decisions,
             "summary": " + ".join(placement_label(data, m, d) for m, d in placements),
             "D_avg": r2(ev.D_avg),
             "min_district": min_district(data, ev),
@@ -141,7 +159,7 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
             "synergies": [" + ".join(s["pair"]) for s in synergy_list(data, ev)],
         }
         if robust:
-            result["worst_case"] = _worst_case(data, placements, ev, robust_ids)
+            result["worst_case"] = worst
         results.append(result)
 
     valid_text = _num(stats["scenarios_valid"])
@@ -163,7 +181,9 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
 
     output = {
         "results": results,
-        "errors": [],
+        # Непустой список только при внутренней ошибке: план, отсеянный страховкой, не показан
+        "errors": [f"Внутренняя проверка: {rejected} найденных планов не прошли validate() "
+                   "и не показаны. Сообщите разработчикам движка."] if rejected else [],
         "message": message,
         "constraints": used_constraints,
         "stats": {
@@ -183,6 +203,16 @@ def optimize(top_n: int = 10, constraints: dict | None = None, data: CityData | 
         output["robust_events"] = robust_ids
         output["robust_budget"] = budget
     return output
+
+
+def _breaks_constraints(decisions: list, exclude: set, include: dict, budget, data: CityData) -> bool:
+    """Нарушает ли готовый план ограничения пользователя (exclude, include, budget)."""
+    chosen = {d["measure"]: d["district"] for d in decisions}
+    return (
+        any(m in chosen for m in exclude)
+        or any(m not in chosen or (did is not None and chosen[m] != did) for m, did in include.items())
+        or data.cost(chosen) > budget
+    )
 
 
 def _worst_case(data: CityData, placements: list, normal, event_ids: list) -> dict:
@@ -283,8 +313,13 @@ def _top_indices(scores: np.ndarray, n: int):
 
 
 def _parse_constraints(constraints, data: CityData):
-    """Разбор ограничений. Возвращает (exclude, include, budget, errors):
-    exclude — множество id мер, include — {мера: район или None}."""
+    """Разбор и проверка ограничений. Возвращает (exclude, include, budget, errors):
+    exclude — множество id мер, include — {мера: район или None}.
+
+    Любой неверный ввод — неизвестный ключ, не тот тип, NaN или бесконечность
+    в бюджете, противоречивые include — даёт понятную ошибку. Молча ничего
+    не игнорируется и не «исправляется».
+    """
     errors = []
     exclude, include, budget = set(), {}, data.budget
     if constraints is None:
@@ -296,29 +331,36 @@ def _parse_constraints(constraints, data: CityData):
 
     unknown_keys = set(constraints) - {"exclude", "include", "budget"}
     if unknown_keys:
-        errors.append(f"Неизвестные ограничения: {', '.join(sorted(unknown_keys))}. Доступны: exclude, include, budget.")
+        errors.append(f"Неизвестные ограничения: {', '.join(sorted(map(str, unknown_keys)))}. "
+                      "Доступны: exclude, include, budget.")
 
-    for item in _as_list(constraints.get("exclude")):
-        mid = data.find_measure(item)
-        if mid is None:
+    # exclude: список id мер
+    items, error = _as_list(constraints.get("exclude"), "exclude", 'например ["M3"]')
+    errors += error
+    for item in items:
+        mid = data.find_measure(item) if isinstance(item, str) else None
+        if not isinstance(item, str):
+            errors.append(f'exclude: элемент {item!r} должен быть строкой с id меры, например "M3".')
+        elif mid is None:
             errors.append(f"exclude: неизвестная мера «{item}».")
         else:
             exclude.add(mid)
 
-    for item in _as_list(constraints.get("include")):
-        raw_mid, district = (item.get("measure"), item.get("district")) if isinstance(item, dict) else (item, None)
-        mid = data.find_measure(raw_mid)
-        if mid is None:
-            errors.append(f"include: неизвестная мера «{raw_mid}».")
-            continue
-        if district is None or str(district).strip() == "":
-            include.setdefault(mid, None)
-        elif data.is_city(mid):
-            errors.append(f"include: мера {mid} общегородская — район для неё не указывается.")
-        elif data.find_district(district) is None:
-            errors.append(f"include: неизвестный район «{district}» у меры {mid}.")
-        else:
-            include[mid] = data.find_district(district)
+    # include: id меры или объект {"measure": ..., "district": ...}
+    items, error = _as_list(constraints.get("include"), "include",
+                            'например ["M12", {"measure": "M7", "district": "nura"}]')
+    errors += error
+    for item in items:
+        mid, did, error = _parse_include_item(item, data)
+        if error:
+            errors.append(error)
+        elif mid in include and None not in (include[mid], did) and include[mid] != did:
+            # Одна мера — один район: противоречие не перезаписываем молча
+            errors.append(f"include: мера {mid} закреплена в двух районах сразу "
+                          f"({data.district_name(include[mid])} и {data.district_name(did)}), "
+                          "а каждую меру можно выбрать только один раз.")
+        elif did is not None or mid not in include:
+            include[mid] = did
 
     both = [m for m in include if m in exclude]
     if both:
@@ -328,20 +370,78 @@ def _parse_constraints(constraints, data: CityData):
 
     if constraints.get("budget") is not None:
         limit = constraints["budget"]
-        if isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit < 0:
-            errors.append("budget должен быть неотрицательным числом.")
+        # NaN отключил бы сравнение cost > budget, бесконечность — лимит. Оба — ошибка ввода.
+        if isinstance(limit, bool) or not isinstance(limit, numbers.Real) or not math.isfinite(limit) or limit < 0:
+            errors.append(f"budget должен быть конечным неотрицательным числом, например 80; получено: {limit!r}.")
         else:
             budget = min(limit, data.budget)
     return exclude, include, budget, errors
 
 
-def _as_list(value) -> list:
-    """None → [], одиночное значение → [значение], список → список."""
+def _parse_include_item(item, data: CityData):
+    """Один элемент include → (мера, район или None, текст ошибки или None)."""
+    if isinstance(item, str):
+        raw_mid, district = item, None
+    elif isinstance(item, dict):
+        extra = sorted(map(str, set(item) - {"measure", "district"}))
+        if extra:
+            return None, None, f"include: неизвестные поля {extra} в {item!r} — допустимы только measure и district."
+        raw_mid, district = item.get("measure"), item.get("district")
+    else:
+        return None, None, (f'include: элемент {item!r} должен быть id меры ("M7") '
+                            'или объектом {"measure": "M7", "district": "nura"}.')
+
+    mid = data.find_measure(raw_mid) if isinstance(raw_mid, str) else None
+    if mid is None:
+        return None, None, f"include: неизвестная мера «{raw_mid}»."
+    if district is not None and not isinstance(district, str):
+        return None, None, f"include: район у меры {mid} должен быть строкой или null, а не {district!r}."
+    if district is None or district.strip() == "":
+        return mid, None, None
+    if data.is_city(mid):
+        return None, None, f"include: мера {mid} общегородская — район для неё не указывается."
+    did = data.find_district(district)
+    if did is None:
+        return None, None, f"include: неизвестный район «{district}» у меры {mid}."
+    return mid, did, None
+
+
+def _include_conflicts(data: CityData, include: dict, budget) -> list:
+    """Закреплённые меры сами по себе не должны нарушать правила ТЗ.
+
+    Иначе перебор вернул бы пустой список без объяснения, а так пользователь
+    (или ИИ-советник) сразу видит, какое требование невыполнимо.
+    """
+    errors = []
+    cost = data.cost(include)
+    if cost > budget:
+        errors.append(f"include: закреплённые меры стоят {cost:g} у.е. — больше лимита {budget:g} у.е.")
+    per_direction = Counter(data.measures[m]["direction"] for m in include)
+    for direction, count in per_direction.items():
+        if count > data.max_per_direction:
+            errors.append(f"include: {count} меры направления «{data.directions[direction]}», "
+                          f"а можно не более {data.max_per_direction}.")
+    for inc in data.incompatibilities:
+        a, b = inc["pair"]
+        if a not in include or b not in include:
+            continue
+        if inc["scope"] == "any":
+            errors.append(f"include: меры {a} и {b} несовместимы. Причина: {inc['reason']}.")
+        elif include[a] is not None and include[a] == include[b]:
+            errors.append(f"include: меры {a} и {b} нельзя размещать в одном районе "
+                          f"({data.district_name(include[a])}). Причина: {inc['reason']}.")
+    return errors
+
+
+def _as_list(value, name: str, example: str) -> tuple[list, list]:
+    """None → [], одиночное значение → [значение], список → список; иначе ошибка типа."""
     if value is None:
-        return []
+        return [], []
     if isinstance(value, (str, dict)):
-        return [value]
-    return list(value)
+        return [value], []
+    if isinstance(value, (list, tuple)):
+        return list(value), []
+    return [], [f"{name} должен быть списком, {example}; получено: {value!r}."]
 
 
 def _num(n: int) -> str:

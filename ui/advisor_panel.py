@@ -20,18 +20,36 @@ def _plan_key(result: dict) -> str:
     return hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _ask(question: str, result: dict) -> dict:
+def _ask(question: str, result: dict, *, history=None, checked_plans=None) -> dict:
     try:
         from agent.advisor import ask_advisor
 
-        with st.spinner("Советник проверяет план и готовит объяснение…"):
-            response = ask_advisor(question, deepcopy(result))
+        with st.spinner("Советник думает…"):
+            response = ask_advisor(question, deepcopy(result), history=history, checked_plans=checked_plans)
         if not isinstance(response, dict) or not isinstance(response.get("answer"), str):
             raise ValueError("Неверный формат ответа советника")
         return response
     except Exception as exc:
         LOGGER.warning("Не удалось получить ответ советника (%s)", type(exc).__name__)
-        return offline_response(result, reason="Онлайн-разбор пока недоступен.")
+        return offline_response(result, reason="Ошибка подключения советника. Показан разбор текущего плана.")
+
+
+def _conversation_context() -> tuple[list[dict], list[dict]]:
+    """Последние реплики и ранее проверенные составы остаются в этой сессии."""
+    messages = st.session_state.messages[-6:]
+    history = [{"role": m["role"], "content": m["content"]} for m in messages]
+    # Состав не теряется после нескольких уточнений без новых расчётов:
+    # окно текста ограничено, а последние проверенные планы ищем во всей сессии.
+    responses = [st.session_state.get("advisor_analysis") or {},
+                 *(m.get("response") or {} for m in st.session_state.messages)]
+    plans = []
+    for response in responses:
+        for plan in response.get("checked_plans", []):
+            # Повторный расчёт того же набора не вытесняет остальные обсуждавшиеся планы.
+            if plan in plans:
+                plans.remove(plan)
+            plans.append(deepcopy(plan))
+    return history, plans[-6:]
 
 
 def ensure_auto_analysis() -> None:
@@ -53,9 +71,8 @@ def ensure_auto_analysis() -> None:
 
 def render_response(response: dict) -> None:
     if response.get("offline"):
-        st.info(response.get("notice") or "Советник работает в офлайн-режиме.")
-        if response.get("reason"):
-            st.caption(response["reason"])
+        st.info((response.get("notice") or "Советник работает в офлайн-режиме.") + " " +
+                (response.get("reason") or "Онлайн-соединение недоступно; использованы данные движка."))
     st.markdown(response["answer"])
     with st.expander("Как советник пришёл к выводу"):
         calls = response.get("tool_calls", [])
@@ -66,6 +83,8 @@ def render_response(response: dict) -> None:
             label = TOOL_LABELS.get(name, "Неизвестный инструмент")
             st.markdown(f"**{index}. {label} · `{name}`**")
             st.caption("Выбор ИИ" if call.get("source") == "model" else "Обязательная проверка приложения")
+            if call.get("note"):
+                st.caption(call["note"])
             st.write("Аргументы:")
             st.json(call.get("arguments", {}), expanded=False)
             if call.get("status") in ("error", "invalid"):
@@ -107,10 +126,11 @@ def render_advisor() -> None:
     question = st.chat_input("Например: найди план без ЛРТ с бюджетом до 80 у.е.",
                              key="advisor_question", disabled=result is None)
     if question:
+        history, plans = _conversation_context()
         st.session_state.messages.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.write(question)
-        response = _ask(question, result["raw"])
+        response = _ask(question, result["raw"], history=history, checked_plans=plans)
         st.session_state.messages.append({"role": "assistant", "content": response["answer"], "response": response})
         with st.chat_message("assistant"):
             render_response(response)

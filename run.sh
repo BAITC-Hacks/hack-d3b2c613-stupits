@@ -75,21 +75,13 @@ if [ -f .env ]; then
     echo "[3/4] Файл .env уже есть."
 else
     cp .env.example .env
-    echo "[3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указаны ключ и модель."
+    echo "[3/4] Создан .env из .env.example: советник работает офлайн, пока в .env не указан ключ OPENAI_API_KEY."
 fi
 
-# 4. Запуск. Браузер открываем сами, когда сервер ответит: в режиме headless
-#    Streamlit не спрашивает e-mail при первом запуске и не зависает на вводе.
+# 4. Python-сервер отдаёт HTML-интерфейс и API. Флаг --open открывает браузер.
 echo "[4/4] Запускаю приложение: $URL   (остановить — Ctrl+C)"
+BROWSER_ARGS=()
 if [ -z "${NO_BROWSER:-}" ]; then
-    (
-        for _ in $(seq 1 120); do
-            if "$VENV_PY" -c "import urllib.request; urllib.request.urlopen('$URL/_stcore/health', timeout=1)" >/dev/null 2>&1; then
-                "$VENV_PY" -m webbrowser -t "$URL" >/dev/null 2>&1 || true
-                break
-            fi
-            sleep 1
-        done
-    ) &
+    BROWSER_ARGS=(--open)
 fi
-exec "$VENV_PY" -m streamlit run app.py --server.port "$PORT" --server.headless true --browser.gatherUsageStats false
+exec "$VENV_PY" -B app.py --host 127.0.0.1 --port "$PORT" "${BROWSER_ARGS[@]}"
